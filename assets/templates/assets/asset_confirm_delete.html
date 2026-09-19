@@ -1,0 +1,16 @@
+{% extends "assets/base.html" %}
+{% block title %}Deactivate Asset{% endblock %}
+{% block content %}
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 520px;">
+    <h5 class="text-secondary mb-3">Deactivate {{ asset.asset_tag }} — {{ asset.name }}?</h5>
+    <p class="text-muted">This marks the asset inactive; it will no longer appear in category lists or dashboard
+        counts, but its full history is kept.</p>
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger">Yes, Deactivate</button>
+        <a href="{% url 'assets:category_detail' asset.category_id %}" class="btn btn-outline-secondary">Cancel</a>
+    </form>
+</div>
+
+{% endblock %}

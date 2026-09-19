@@ -1,0 +1,64 @@
+{% extends "assets/base.html" %}
+{% load asset_extras %}
+{% block title %}{{ category.name }} - Asset Register{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <a href="{% url 'assets:dashboard' %}" class="btn-back">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+        <h3 class="fw-bold text-secondary mt-1">{{ category.name }}</h3>
+    </div>
+    <a href="{% url 'assets:asset_create' %}?category={{ category.id }}" class="btn btn-swift">
+        <i class="bi bi-plus-lg"></i> Add {% if is_info_register %}Record{% else %}Asset{% endif %}
+    </a>
+</div>
+
+<div class="card card-stat">
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    {% if not is_info_register %}
+                    <th>Tag</th>
+                    <th>Name</th>
+                    <th>Brand / Model</th>
+                    <th>Serial No.</th>
+                    <th>Status</th>
+                    <th>Current User / Location</th>
+                    <th>Previous User / Location</th>
+                    {% endif %}
+                    {% for field in category_fields %}
+                    <th>{{ field.label }}</th>
+                    {% endfor %}
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in assets %}
+                <tr>
+                    {% if not is_info_register %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    <td>{{ a.name }}</td>
+                    <td>{{ a.brand }} {{ a.model_number }}</td>
+                    <td>{{ a.serial_number|default:"—" }}</td>
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    <td>{{ a.current_assigned_to|default:"—" }} {% if a.current_location %}/ {{ a.current_location }}{% endif %}</td>
+                    <td class="text-muted">{{ a.previous_assigned_to|default:"—" }} {% if a.previous_location %}/ {{ a.previous_location }}{% endif %}</td>
+                    {% endif %}
+                    {% for field in category_fields %}
+                    <td>{{ a.extra_details|get_item:field.name|default:"—" }}</td>
+                    {% endfor %}
+                    <td><a href="{% url 'assets:asset_update' a.id %}" class="btn btn-sm btn-outline-secondary">Edit</a></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="{{ category_fields|length|add:8 }}" class="text-muted text-center py-3">No records in this category yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+

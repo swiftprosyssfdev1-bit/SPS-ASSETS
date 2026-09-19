@@ -1,0 +1,131 @@
+{% extends "assets/base.html" %}
+{% load asset_extras %}
+{% block title %}{{ title }} - Asset Register{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4 mx-auto" style="max-width: 720px;">
+    <h3 class="fw-bold text-secondary">{{ title }}</h3>
+    <a href="{% url 'assets:dashboard' %}" class="btn-back">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+    </a>
+</div>
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 720px;">
+    <form method="post">
+        {% csrf_token %}
+
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Category</label>
+                {{ form.category }}
+                {{ form.category.errors }}
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">{% if employee_form %}Employee ID{% else %}Asset Tag{% endif %}</label>
+                {{ form.asset_tag }}
+                {% if not employee_form %}<div class="form-text">Unique ID, e.g. WS001, M009, K014, U006</div>{% endif %}
+                {{ form.asset_tag.errors }}
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">{% if employee_form %}Employee Name{% else %}Name{% endif %}</label>
+                {{ form.name }}
+                {{ form.name.errors }}
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Status</label>
+                {{ form.status }}
+            </div>
+
+            {% if not is_info_register %}
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Brand</label>
+                {{ form.brand }}
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Model Number</label>
+                {{ form.model_number }}
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Serial Number</label>
+                {{ form.serial_number }}
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Current Assigned To</label>
+                {{ form.current_assigned_to }}
+                <div class="form-text">Current user / employee / location</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Current Location</label>
+                {{ form.current_location }}
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Linked Workstation</label>
+                {{ form.linked_workstation }}
+                <div class="form-text">Workstation ID this item is used in, e.g. WS004 (optional)</div>
+            </div>
+
+            {% endif %}
+
+            {% if category_fields and not employee_form %}
+            <div class="col-12">
+                <hr>
+                <h6 class="fw-bold text-secondary mb-0">{{ category.name }} Information</h6>
+            </div>
+            {% for field in category_fields %}
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">{{ field.label }}</label>
+                {% if field.type == "select" %}
+                <select name="{{ field.name }}" class="form-select">
+                    <option value="">—</option>
+                    {% for opt in field.options %}
+                    <option value="{{ opt }}" {% if asset.extra_details|get_item:field.name == opt %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                {% elif field.type == "date" %}
+                <input type="date" name="{{ field.name }}" class="form-control" value="{{ asset.extra_details|get_item:field.name }}">
+                {% elif field.type == "number" %}
+                <input type="number" name="{{ field.name }}" class="form-control" value="{{ asset.extra_details|get_item:field.name }}">
+                {% else %}
+                <input type="text" name="{{ field.name }}" class="form-control" value="{{ asset.extra_details|get_item:field.name }}">
+                {% endif %}
+            </div>
+            {% endfor %}
+            <div class="col-12"><hr></div>
+            {% endif %}
+
+            {% if not is_info_register %}
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Purchase Date</label>
+                {{ form.purchase_date }}
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">Last Service Date</label>
+                {{ form.last_service_date }}
+            </div>
+
+            {% endif %}
+
+            <div class="col-12">
+                <label class="form-label fw-semibold">Notes</label>
+                {{ form.notes }}
+            </div>
+
+            <div class="col-12 form-check ms-1">
+                {{ form.is_active }}
+                <label class="form-check-label" for="{{ form.is_active.id_for_label }}">Active</label>
+            </div>
+        </div>
+
+        <div class="mt-4 d-flex gap-2">
+            <button type="submit" class="btn btn-swift px-4">Save</button>
+            {% if asset %}
+            <a href="{% url 'assets:asset_delete' asset.id %}" class="btn btn-outline-danger">Deactivate</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+{% endblock %}

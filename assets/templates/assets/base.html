@@ -1,0 +1,199 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Swift ProSys Asset Register{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --swift-blue: #29ABE2;
+            --swift-blue-dark: #1c7fa8;
+            --swift-orange: #F7941D;
+            --swift-navy: #1c2b3a;
+            --swift-bg: #eef1f6;
+        }
+        body {
+            background-color: var(--swift-bg);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #2c3542;
+        }
+        .navbar-brand img { height: 36px; }
+        .navbar-swift {
+            background: linear-gradient(90deg, var(--swift-navy) 0%, #24384b 100%);
+            border-bottom: 3px solid var(--swift-orange);
+        }
+        .navbar-swift .brand-text { color: #fff; letter-spacing: .2px; }
+        .navbar-swift .btn-outline-secondary {
+            color: #dfe6ee; border-color: rgba(255,255,255,0.25); background: transparent;
+        }
+        .navbar-swift .btn-outline-secondary:hover { background: rgba(255,255,255,0.08); color: #fff; }
+        .navbar-swift .user-chip { color: #b9c4d1; }
+        .navbar-swift .btn-outline-danger { border-color: rgba(220,90,90,0.6); color: #ff9c9c; }
+        .navbar-swift .btn-outline-danger:hover { background: rgba(220,90,90,0.15); color: #fff; }
+
+        .btn-swift { background-color: var(--swift-blue); border-color: var(--swift-blue); color: #fff; font-weight: 500; }
+        .btn-swift:hover { background-color: var(--swift-blue-dark); border-color: var(--swift-blue-dark); color: #fff; }
+
+        .page-title { font-weight: 800; color: var(--swift-navy); letter-spacing: -.3px; }
+        .section-title { font-weight: 700; color: var(--swift-navy); }
+
+        .card-stat {
+            border: none; border-radius: 16px;
+            box-shadow: 0 1px 3px rgba(20,30,45,0.06), 0 8px 20px -12px rgba(20,30,45,0.12);
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+        .card-stat.hoverable:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 10px rgba(20,30,45,0.08), 0 16px 28px -14px rgba(20,30,45,0.18);
+        }
+        .card-stat .stat-number { font-size: 2.1rem; font-weight: 800; color: var(--swift-navy); line-height: 1; }
+        .stat-icon-wrap {
+            width: 46px; height: 46px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(41,171,226,0.12); color: var(--swift-blue); font-size: 1.3rem;
+        }
+        .stat-icon-wrap.orange { background: rgba(247,148,29,0.14); color: var(--swift-orange); }
+
+        .badge-status-working { background-color: #2e7d32; }
+        .badge-status-not_working { background-color: #c62828; }
+        .badge-status-idle { background-color: #9e9e9e; }
+        .badge-status-scrap { background-color: #424242; }
+        .badge-status-missing { background-color: #ad1457; }
+        .badge-status-service { background-color: var(--swift-orange); }
+
+        .category-icon-wrap {
+            width: 42px; height: 42px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(247,148,29,0.14); color: var(--swift-orange); font-size: 1.2rem; flex-shrink: 0;
+        }
+        a.category-link { text-decoration: none; color: inherit; }
+
+        .other-toggle { cursor: pointer; }
+        .other-toggle .chevron { transition: transform .2s ease; }
+        .other-toggle[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+        .other-dropdown-menu {
+            border: none; border-radius: 12px; min-width: 100%;
+            box-shadow: 0 4px 10px rgba(20,30,45,0.08), 0 16px 28px -14px rgba(20,30,45,0.22) !important;
+        }
+        .other-dropdown-menu .dropdown-item { color: #2c3542; }
+        .other-dropdown-menu .dropdown-item:hover,
+        .other-dropdown-menu .dropdown-item:focus { background-color: rgba(41,171,226,0.1); color: var(--swift-blue); }
+
+        .table thead.table-light th {
+            background-color: #f6f8fb; color: #5a6675; font-weight: 600;
+            font-size: .8rem; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #e7ebf1;
+        }
+
+        .btn-back {
+            display: inline-flex; align-items: center; gap: .4rem;
+            background: #fff; border: 1px solid #e2e7ee; color: #4a5568;
+            font-weight: 500; font-size: .85rem; padding: .4rem .85rem;
+            border-radius: 999px; text-decoration: none;
+            box-shadow: 0 1px 2px rgba(20,30,45,0.05);
+            transition: background .15s ease, color .15s ease, border-color .15s ease;
+        }
+        .btn-back:hover { background: var(--swift-blue); color: #fff; border-color: var(--swift-blue); }
+        .btn-back i { font-size: .8rem; }
+
+        .form-label { color: var(--swift-navy); font-size: .88rem; margin-bottom: .35rem; }
+        .form-control, .form-select {
+            border: 1px solid #dde3ec; border-radius: 10px;
+            padding: .55rem .8rem; font-size: .92rem; color: #2c3542;
+            background-color: #fbfcfe;
+            transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: var(--swift-blue); background-color: #fff;
+            box-shadow: 0 0 0 3px rgba(41,171,226,0.15); outline: none;
+        }
+        textarea.form-control { min-height: 110px; resize: none; }
+        .form-text { font-size: .78rem; color: #8a94a3; margin-top: .3rem; }
+        .form-check-input { border: 1px solid #c7cfdb; }
+        .form-check-input:checked { background-color: var(--swift-blue); border-color: var(--swift-blue); }
+        .form-check-input:focus { box-shadow: 0 0 0 3px rgba(41,171,226,0.15); }
+        .form-check-label { font-size: .9rem; color: #2c3542; }
+
+        /* ── Navbar search bar ─────────────────────────────────────── */
+        .navbar-search-form { flex: 0 1 380px; min-width: 0; }
+        .navbar-search-group { border-radius: 999px; overflow: hidden; }
+        .navbar-search-icon {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+            border-right: none; color: rgba(255,255,255,0.6); padding: .35rem .75rem;
+        }
+        .navbar-search-input {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+            border-left: none; color: #fff; font-size: .875rem;
+            border-radius: 0 999px 999px 0 !important; padding: .35rem .9rem;
+        }
+        .navbar-search-input::placeholder { color: rgba(255,255,255,0.45); }
+        .navbar-search-input:focus {
+            background: #fff; color: #2c3542; border-color: var(--swift-blue);
+            box-shadow: 0 0 0 3px rgba(41,171,226,0.25);
+        }
+        .navbar-search-input:focus + .navbar-search-icon,
+        .navbar-search-group:focus-within .navbar-search-icon {
+            background: #f0f8ff; border-color: var(--swift-blue); color: var(--swift-blue);
+        }
+        .navbar-search-input::-webkit-search-cancel-button { cursor: pointer; }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+{% if user.is_authenticated %}
+<nav class="navbar navbar-expand-lg navbar-swift shadow-sm mb-4">
+    <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'assets:dashboard' %}">
+            <img src="{% static 'img/logo.jpg' %}" alt="Swift ProSys">
+            <span class="fw-semibold brand-text">Asset Register</span>
+        </a>
+        <form class="d-flex mx-auto navbar-search-form" action="{% url 'assets:search_assets' %}" method="get" role="search">
+            <div class="input-group navbar-search-group">
+                <span class="input-group-text navbar-search-icon">
+                    <i class="bi bi-search"></i>
+                </span>
+                <input class="form-control navbar-search-input" type="search" name="q"
+                       placeholder="Search assets, tags, serials…"
+                       value="{{ request.GET.q|default:'' }}"
+                       autocomplete="off" aria-label="Quick search">
+            </div>
+        </form>
+        <div class="d-flex align-items-center gap-3">
+            {% if user.is_staff or user.is_superuser %}
+            <a href="{% url 'assets:bulk_import' %}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-upload"></i> Import
+            </a>
+            {% endif %}
+            <a href="/admin/" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-gear"></i> Admin Panel
+            </a>
+            <span class="user-chip small">Hi, {{ user.get_username }}</span>
+            <form action="{% url 'assets:logout' %}" method="post" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+{% endif %}
+<div class="container-fluid px-4 pb-5">
+    {% if messages %}
+        {% for message in messages %}
+        {% if message.tags == 'error' %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        {% else %}
+        <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
+        {% endif %}
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

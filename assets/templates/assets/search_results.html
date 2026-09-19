@@ -1,0 +1,166 @@
+{% extends "assets/base.html" %}
+{% block title %}Search — Asset Register{% endblock %}
+
+{% block extra_head %}
+<style>
+    .search-hero {
+        background: linear-gradient(135deg, var(--swift-navy) 0%, #24384b 100%);
+        border-radius: 18px;
+        padding: 2rem 2.5rem;
+        margin-bottom: 1.75rem;
+        color: #fff;
+    }
+    .search-hero-form .input-group { max-width: 560px; }
+    .search-hero-input {
+        border-radius: 999px 0 0 999px !important;
+        border: none; padding: .65rem 1.1rem;
+        font-size: 1rem; color: #2c3542;
+    }
+    .search-hero-input:focus { box-shadow: none; border-color: transparent; }
+    .search-hero-btn {
+        border-radius: 0 999px 999px 0 !important;
+        background: var(--swift-blue); border: none; color: #fff;
+        padding: .65rem 1.3rem; font-weight: 600;
+    }
+    .search-hero-btn:hover { background: var(--swift-blue-dark); color: #fff; }
+
+    .result-count { font-size: .85rem; color: #7a8696; margin-top: .25rem; }
+
+    .status-pill {
+        display: inline-block; padding: .2em .65em;
+        border-radius: 999px; font-size: .75rem; font-weight: 600;
+        letter-spacing: .3px; white-space: nowrap;
+    }
+    .status-pill-working   { background: #e6f4ea; color: #2e7d32; }
+    .status-pill-not_working { background: #fdecea; color: #c62828; }
+    .status-pill-idle      { background: #f3f4f6; color: #6b7280; }
+    .status-pill-scrap     { background: #f3f4f6; color: #374151; }
+    .status-pill-missing   { background: #fce4ec; color: #ad1457; }
+    .status-pill-service   { background: #fff3e0; color: #e65100; }
+    .status-pill-active    { background: #e3f2fd; color: #1565c0; }
+    .status-pill-default   { background: #f3f4f6; color: #6b7280; }
+
+    .result-tag { font-weight: 700; color: var(--swift-navy); font-family: 'Inter', monospace; }
+    .result-cat { font-size: .78rem; color: #9ca3af; }
+    .empty-state { text-align: center; padding: 4rem 1rem; color: #9ca3af; }
+    .empty-state i { font-size: 3rem; display: block; margin-bottom: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="search-hero">
+    <h4 class="mb-1 fw-bold">Quick Asset Search</h4>
+    <p class="mb-3" style="color: rgba(255,255,255,.65); font-size:.9rem;">
+        Search by asset tag, name, brand, serial number, model, assigned user or location.
+    </p>
+    <form class="search-hero-form" action="{% url 'assets:search_assets' %}" method="get" role="search">
+        <div class="input-group shadow">
+            <input class="form-control search-hero-input" type="search" name="q"
+                   value="{{ query }}" placeholder="e.g. WS001, Logitech, John, Dell…"
+                   autofocus autocomplete="off" aria-label="Search assets">
+            <button class="btn search-hero-btn" type="submit">
+                <i class="bi bi-search me-1"></i> Search
+            </button>
+        </div>
+    </form>
+</div>
+
+{% if query %}
+    {% if results %}
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <div>
+            <span class="fw-semibold section-title">Results for "<em>{{ query }}</em>"</span>
+            <span class="result-count ms-2">
+                {{ results|length }} asset{{ results|length|pluralize }} found
+                {% if results|length == 100 %}<span class="text-warning">(showing first 100)</span>{% endif %}
+            </span>
+        </div>
+        <a href="{% url 'assets:dashboard' %}" class="btn-back">
+            <i class="bi bi-arrow-left"></i> Dashboard
+        </a>
+    </div>
+
+    <div class="card card-stat">
+        <div class="table-responsive">
+            <table class="table mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Asset Tag</th>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Brand / Model</th>
+                        <th>Serial No.</th>
+                        <th>Status</th>
+                        <th>Assigned To</th>
+                        <th>Location</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for asset in results %}
+                    <tr>
+                        <td>
+                            <span class="result-tag">{{ asset.asset_tag }}</span>
+                        </td>
+                        <td>{{ asset.name }}</td>
+                        <td>
+                            <a href="{% url 'assets:category_detail' asset.category_id %}"
+                               class="text-decoration-none text-muted small">
+                                {{ asset.category.name }}
+                            </a>
+                        </td>
+                        <td class="small text-muted">
+                            {{ asset.brand|default:"—" }}
+                            {% if asset.model_number %}<br><span style="font-size:.75rem">{{ asset.model_number }}</span>{% endif %}
+                        </td>
+                        <td class="small text-muted">{{ asset.serial_number|default:"—" }}</td>
+                        <td>
+                            {% with s=asset.status %}
+                            <span class="status-pill status-pill-{{ s }}">
+                                {{ asset.get_status_display }}
+                            </span>
+                            {% endwith %}
+                        </td>
+                        <td class="small">{{ asset.current_assigned_to|default:"—" }}</td>
+                        <td class="small text-muted">{{ asset.current_location|default:"—" }}</td>
+                        <td>
+                            <a href="{% url 'assets:asset_update' asset.id %}"
+                               class="btn btn-sm btn-outline-secondary py-0 px-2">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% else %}
+    <div class="card card-stat py-2">
+        <div class="empty-state">
+            <i class="bi bi-search text-muted"></i>
+            <h5 class="fw-semibold text-muted">No assets found</h5>
+            <p class="text-muted mb-3">
+                Nothing matched "<strong>{{ query }}</strong>".<br>
+                Try a different tag, name, brand, or serial number.
+            </p>
+            <a href="{% url 'assets:dashboard' %}" class="btn btn-swift btn-sm">
+                <i class="bi bi-house me-1"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
+{% else %}
+<div class="card card-stat py-2">
+    <div class="empty-state">
+        <i class="bi bi-search text-muted"></i>
+        <h5 class="fw-semibold text-muted">Enter a search term above</h5>
+        <p class="text-muted">Search by asset tag, name, brand, serial number, model, user or location.</p>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

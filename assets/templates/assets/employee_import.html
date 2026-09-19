@@ -1,0 +1,137 @@
+{% extends "assets/base.html" %}
+{% block title %}Bulk Import Employees - Asset Register{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <a href="{% url 'assets:dashboard' %}" class="btn-back">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+        <h3 class="fw-bold text-secondary mt-1">Bulk Import Employees</h3>
+    </div>
+    <a href="#" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-file-earmark-arrow-down"></i> Download Sample Template
+    </a>
+</div>
+
+{% if file_error %}
+<div class="alert alert-danger mx-auto" style="max-width: 720px;">
+    <div class="d-flex align-items-start gap-2">
+        <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+        <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">We couldn't read that file</div>
+            <div class="mb-2">{{ file_error }}</div>
+            <a href="#" class="btn btn-sm btn-danger">
+                <i class="bi bi-file-earmark-arrow-down"></i> Download Sample Template
+            </a>
+            <span class="small ms-1">— fill your rows in under the header row and re-upload.</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if not results %}
+<div class="card card-stat p-4 mx-auto" style="max-width: 720px;">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label class="form-label fw-semibold">Choose file (.csv, .txt, or .xlsx)</label>
+        <input type="file" name="import_file" accept=".csv,.txt,.xlsx" class="form-control mb-3" required>
+        <button type="submit" class="btn btn-swift">
+            <i class="bi bi-search"></i> Validate File
+        </button>
+    </form>
+
+    <hr class="my-4">
+    <div class="small text-muted">
+        <div class="fw-semibold mb-2">Expected columns:</div>
+        <div class="d-flex flex-wrap gap-1 mb-3">
+            <span class="badge text-bg-light border">EmployeeName</span>
+            <span class="badge text-bg-light border">Employee Id</span>
+            <span class="badge text-bg-light border">Status</span>
+        </div>
+        <ul class="mb-3 ps-3">
+            <li><strong>Employee Id</strong> and <strong>EmployeeName</strong> are required.</li>
+            <li><strong>Employee Id</strong> must be unique — not already used, and not repeated in the file.</li>
+            <li><strong>Status</strong> accepts values like Active, Inactive (defaults to Active if blank).</li>
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+{% if results %}
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card card-stat p-3">
+            <div class="text-muted small">Total Rows</div>
+            <div class="stat-number">{{ summary.total }}</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card card-stat p-3">
+            <div class="text-muted small">Valid</div>
+            <div class="stat-number text-success">{{ summary.valid }}</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card card-stat p-3">
+            <div class="text-muted small">Invalid</div>
+            <div class="stat-number text-danger">{{ summary.invalid }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card card-stat mb-4">
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Employee Name</th>
+                    <th>Employee Id</th>
+                    <th>Status</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in results %}
+                <tr class="{% if not row.is_valid %}table-danger{% endif %}">
+                    <td>{{ row.row_number }}</td>
+                    <td>{{ row.raw.EmployeeName }}</td>
+                    <td class="fw-semibold">{{ row.raw.EmployeeId }}</td>
+                    <td>{{ row.raw.Status }}</td>
+                    <td>
+                        {% if row.is_valid %}
+                        <span class="badge bg-success">Valid</span>
+                        {% else %}
+                        <span class="badge bg-danger">Invalid</span>
+                        <div class="small text-danger mt-1">
+                            {% for err in row.errors %}{{ err }}{% if not forloop.last %}; {% endif %}{% endfor %}
+                        </div>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="d-flex gap-2">
+    {% if summary.valid > 0 %}
+    <form method="post" action="#">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-swift">
+            <i class="bi bi-check-lg"></i> Confirm &amp; Import {{ summary.valid }} Employee{{ summary.valid|pluralize }}
+        </button>
+    </form>
+    {% endif %}
+    <a href="#" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-repeat"></i> Upload a Different File
+    </a>
+</div>
+<div class="small text-muted mt-2">
+    Only the {{ summary.valid }} valid row(s) above will be added. Fix the invalid rows in your file and re-upload to include them too.
+</div>
+{% endif %}
+
+{% endblock %}
