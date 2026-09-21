@@ -172,11 +172,8 @@ LOGOUT_REDIRECT_URL = 'assets:login'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# Email
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
+# Bulk database operations safeguard
+# When False, the "Clear All Records" feature is completely disabled in backend and UI.
+# In live production, set ALLOW_CLEAR_ALL=False in your .env or environment.
+ALLOW_CLEAR_ALL = os.getenv('ALLOW_CLEAR_ALL', 'True').strip().lower() in ('true', '1', 'yes')
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}

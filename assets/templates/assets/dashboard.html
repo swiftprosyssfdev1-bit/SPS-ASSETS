@@ -11,7 +11,7 @@
         <a href="{% url 'assets:export_assets' %}" class="btn btn-outline-secondary">
             <i class="bi bi-file-earmark-excel"></i> Download All (Excel)
         </a>
-        {% if user.is_staff or user.is_superuser %}
+        {% if allow_clear_all %}
         <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearAllModal">
             <i class="bi bi-trash3"></i> Clear All Records
         </button>
@@ -22,24 +22,35 @@
     </div>
 </div>
 
-{% if user.is_staff or user.is_superuser %}
+{% if allow_clear_all %}
 <div class="modal fade" id="clearAllModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
-        <div class="modal-content">
+        <div class="modal-content border-danger">
             <form method="post" action="{% url 'assets:clear_all_assets' %}">
                 {% csrf_token %}
-                <div class="modal-header">
-                    <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Clear All Records</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-shield-exclamation me-2"></i> Superuser Action: Clear All Records</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>This permanently deletes <strong>every asset in every category</strong> ({{ total_records }} active records) and their history. This cannot be undone.</p>
-                    <label class="form-label fw-semibold">Type <code>DELETE</code> to confirm</label>
-                    <input type="text" name="confirm_text" class="form-control" autocomplete="off" required>
+                    <div class="alert alert-danger py-2 mb-3">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <strong>Extreme Caution:</strong> This will permanently erase <strong>all active records</strong> and all audit history across every category.
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">1. Type <code>DELETE ALL ASSETS</code> to confirm:</label>
+                        <input type="text" name="confirm_text" class="form-control" autocomplete="off" placeholder="DELETE ALL ASSETS" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">2. Enter your Superuser Password:</label>
+                        <input type="password" name="admin_password" class="form-control" autocomplete="current-password" placeholder="Your password" required>
+                    </div>
                 </div>
-                <div class="modal-footer">
+                <div class="modal-footer bg-light">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-danger">Delete Everything</button>
+                    <button type="submit" class="btn btn-danger">Confirm & Permanently Delete</button>
                 </div>
             </form>
         </div>
@@ -154,9 +165,6 @@
             <thead class="table-light">
                 <tr>
                     <th>Asset</th>
-                    <th>Field</th>
-                    <th>Previous</th>
-                    <th>Now</th>
                     <th>Changed By</th>
                     <th>When</th>
                 </tr>
@@ -164,15 +172,12 @@
             <tbody>
                 {% for h in recent_changes %}
                 <tr>
-                    <td>{{ h.asset.asset_tag }} — {{ h.asset.name }}</td>
-                    <td class="text-capitalize">{{ h.field_name|cut:"_" }}</td>
-                    <td class="text-muted">{{ h.old_value|default:"—" }}</td>
-                    <td class="fw-semibold">{{ h.new_value|default:"—" }}</td>
+                    <td>{{ h.asset.name }}</td>
                     <td>{{ h.changed_by|default:"—" }}</td>
                     <td class="text-muted small">{{ h.changed_at }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-muted text-center py-3">No changes logged yet.</td></tr>
+                <tr><td colspan="3" class="text-muted text-center py-3">No changes logged yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

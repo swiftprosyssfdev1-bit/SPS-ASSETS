@@ -7,7 +7,7 @@ from django.contrib.auth.views import LoginView
 from django.db import transaction, IntegrityError
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
@@ -25,8 +25,13 @@ from .import_utils import (
     serialize_for_session, deserialize_from_session, _normalize_header,
 )
 
+from django.conf import settings
+
 admin_required = user_passes_test(
     lambda u: u.is_staff or u.is_superuser, login_url="assets:dashboard"
+)
+superuser_required = user_passes_test(
+    lambda u: u.is_active and u.is_superuser, login_url="assets:dashboard"
 )
 
 
@@ -67,16 +72,28 @@ DEFAULT_CATEGORY_ICON = "bi-hdd-stack"
 
 
 @login_required
-@admin_required
+@superuser_required
 def clear_all_assets(request):
+    if not getattr(settings, "ALLOW_CLEAR_ALL", True):
+        messages.error(request, "Clear all records is disabled in this environment.")
+        return redirect("assets:dashboard")
+
     if request.method == "POST":
         confirm_text = request.POST.get("confirm_text", "").strip()
-        if confirm_text != "DELETE":
-            messages.error(request, "Type DELETE exactly to confirm. Nothing was deleted.")
+        admin_password = request.POST.get("admin_password", "")
+
+        if confirm_text != "DELETE ALL ASSETS":
+            messages.error(request, "Confirmation text did not match 'DELETE ALL ASSETS'. Nothing was deleted.")
             return redirect("assets:dashboard")
-        count = Asset.objects.count()
-        Asset.objects.all().delete()
-        messages.success(request, f"Cleared all {count} asset record(s).")
+
+        if not request.user.check_password(admin_password):
+            messages.error(request, "Incorrect administrator password. Deletion cancelled.")
+            return redirect("assets:dashboard")
+
+        with transaction.atomic():
+            count = Asset.objects.count()
+            Asset.objects.all().delete()
+        messages.success(request, f"Cleared all {count} asset record(s) and their audit history.")
         return redirect("assets:dashboard")
     return redirect("assets:dashboard")
 
@@ -144,14 +161,27 @@ def dashboard(request):
         .annotate(count=Count("id"))
         .order_by("-count")
     )
-    recent_changes = AssetHistory.objects.select_related("asset", "changed_by")[:15]
+    recent_changes = (
+        AssetHistory.objects
+        .select_related("asset", "changed_by")
+        # Dashboard is a clean, at-a-glance summary — leave out entries for
+        # assets whose tag was auto-suffixed to dodge a collision during
+        # import (e.g. "7" and "7-2" from two stacked vendor lists in one
+        # sheet). That's real data, not an error, but showing the raw "-2"
+        # tag here reads as a glitch. Nothing is hidden from the full
+        # history: /history has every row, unfiltered, with full detail.
+        .exclude(asset__asset_tag__iregex=r"-\d+$")
+        [:15]
+    )
 
+    allow_clear_all = bool(getattr(settings, "ALLOW_CLEAR_ALL", True) and request.user.is_superuser)
     context = {
         "main_categories": main_categories,
         "total_assets": total_assets,
         "total_records": total_records,
         "status_breakdown": status_breakdown,
         "recent_changes": recent_changes,
+        "allow_clear_all": allow_clear_all,
     }
     return render(request, "assets/dashboard.html", context)
 
@@ -716,21 +746,32 @@ def bulk_import_confirm(request):
 
 @login_required
 def search_assets(request):
-    """Quick search across assets by tag, name, brand, serial number,
-    model number, assigned user or location."""
+    """Quick search across assets and categories by category name, tag,
+    name, brand, serial number, model number, assigned user or location."""
     query = request.GET.get("q", "").strip()
     results = []
+    matching_categories = []
     if query:
+        matching_categories = list(
+            AssetCategory.objects.filter(name__icontains=query)
+            .annotate(total=Count("assets", filter=Q(assets__is_active=True)))
+            .order_by("name")
+        )
+        for cat in matching_categories:
+            cat.icon_class = CATEGORY_ICONS.get(cat.name, cat.icon or DEFAULT_CATEGORY_ICON)
+
         results = (
             Asset.objects.filter(is_active=True)
             .filter(
-                Q(asset_tag__icontains=query)
+                Q(category__name__icontains=query)
+                | Q(asset_tag__icontains=query)
                 | Q(name__icontains=query)
                 | Q(brand__icontains=query)
                 | Q(serial_number__icontains=query)
                 | Q(model_number__icontains=query)
                 | Q(current_assigned_to__icontains=query)
                 | Q(current_location__icontains=query)
+                | Q(notes__icontains=query)
             )
             .select_related("category")
             .order_by("category__name", "asset_tag")[:100]
@@ -738,6 +779,64 @@ def search_assets(request):
     return render(request, "assets/search_results.html", {
         "query": query,
         "results": results,
+        "matching_categories": matching_categories,
+    })
+
+
+@login_required
+def search_suggestions(request):
+    """JSON API endpoint providing instant autocomplete suggestions for categories and assets."""
+    query = request.GET.get("q", "").strip()
+    if not query:
+        return JsonResponse({"categories": [], "assets": []})
+
+    categories = list(
+        AssetCategory.objects.filter(name__icontains=query)
+        .annotate(total=Count("assets", filter=Q(assets__is_active=True)))
+        .order_by("name")[:5]
+    )
+    cat_data = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "total": c.total,
+            "icon": CATEGORY_ICONS.get(c.name, c.icon or DEFAULT_CATEGORY_ICON),
+        }
+        for c in categories
+    ]
+
+    assets = (
+        Asset.objects.filter(is_active=True)
+        .filter(
+            Q(asset_tag__icontains=query)
+            | Q(name__icontains=query)
+            | Q(brand__icontains=query)
+            | Q(serial_number__icontains=query)
+            | Q(model_number__icontains=query)
+            | Q(current_assigned_to__icontains=query)
+            | Q(current_location__icontains=query)
+            | Q(category__name__icontains=query)
+        )
+        .select_related("category")
+        .order_by("category__name", "asset_tag")[:8]
+    )
+    asset_data = [
+        {
+            "id": a.id,
+            "tag": a.asset_tag,
+            "name": a.name,
+            "category": a.category.name,
+            "assigned_to": a.current_assigned_to or "",
+            "location": a.current_location or "",
+            "status": a.get_status_display(),
+        }
+        for a in assets
+    ]
+
+    return JsonResponse({
+        "query": query,
+        "categories": cat_data,
+        "assets": asset_data,
     })
 
 

@@ -47,6 +47,7 @@ HEADER_ALIASES = {
     "system no": "asset_tag",           # CPU - System Unit, Software and OS
     "asset name": "name",
     "system name": "name",
+    "vendor name": "name",              # IT Vendor
     "devices": "name",                  # others / Bluetooth
     "device name": "name",              # others
     "serial no": "serial_number",
@@ -107,6 +108,9 @@ SHEET_HEADER_OVERRIDES = {
     },
     "project backup": {
         "hard disk name": "asset_tag",
+    },
+    "it vendor": {
+        "vendor name": "name",
     },
 }
 

@@ -98,21 +98,15 @@ CATEGORY_FIELDS = {
 }
 
 
-# Column names that must NEVER be surfaced as a visible extra_details field,
-# no matter what header text the source data used. These come from legacy
-# sheets that stored real secrets in plain text (e.g. the "CPU - System
-# Unit" sheet's system login Password, "Software and OS" sheet's Product
-# Key). Matched case-insensitively against the raw header text kept as the
-# extra_details key. If a row's extra_details already contains one of these
-# keys (e.g. from data imported before this fix), it's hidden from the
-# dynamically-discovered field list here, but the raw value MAY still be
-# present in the JSON in the DB — that data should be scrubbed separately
-# (see fix_legacy_secrets management step) rather than relying on this UI
-# filter alone.
-SENSITIVE_FIELD_NAMES = {
-    "password", "passwd", "pwd", "product key", "cd key", "license key",
-    "activation key", "serial key", "api key", "secret",
-}
+# Column names that used to be force-hidden everywhere (import, detail
+# tables, discovery) because they store real secrets in plain text (e.g.
+# the "CPU - System Unit" sheet's system login Password, "Software and OS"
+# sheet's Product Key). That filter is intentionally OFF now — this is an
+# internal register and these values are needed on-screen — so this set is
+# empty and _is_sensitive_field() always returns False. Left in place (and
+# still used by scrub_legacy_secrets.py) so it's a one-line change to turn
+# hiding back on for some or all of these names if that's ever needed again.
+SENSITIVE_FIELD_NAMES = set()
 
 
 def _normalize_field_name(name):

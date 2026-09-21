@@ -67,10 +67,35 @@
 </div>
 
 {% if query %}
+    {% if matching_categories %}
+    <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold text-dark text-uppercase small mb-0">
+                <i class="bi bi-folder2-open text-primary me-1"></i> Matching Categories
+            </h6>
+        </div>
+        <div class="row g-2">
+            {% for cat in matching_categories %}
+            <div class="col-md-3 col-sm-6">
+                <a href="{% url 'assets:category_detail' cat.id %}" class="card card-stat hoverable p-3 text-decoration-none h-100">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-semibold text-dark mb-0">{{ cat.name }}</div>
+                            <div class="text-muted small">{{ cat.total }} active record{{ cat.total|pluralize }}</div>
+                        </div>
+                        <div class="category-icon-wrap"><i class="bi {{ cat.icon_class }}"></i></div>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     {% if results %}
     <div class="d-flex align-items-center justify-content-between mb-3">
         <div>
-            <span class="fw-semibold section-title">Results for "<em>{{ query }}</em>"</span>
+            <span class="fw-semibold section-title">Assets matching "<em>{{ query }}</em>"</span>
             <span class="result-count ms-2">
                 {{ results|length }} asset{{ results|length|pluralize }} found
                 {% if results|length == 100 %}<span class="text-warning">(showing first 100)</span>{% endif %}
@@ -81,7 +106,7 @@
         </a>
     </div>
 
-    <div class="card card-stat">
+    <div class="card card-stat mb-4">
         <div class="table-responsive">
             <table class="table mb-0 align-middle">
                 <thead class="table-light">
@@ -137,14 +162,14 @@
         </div>
     </div>
 
-    {% else %}
+    {% elif not matching_categories %}
     <div class="card card-stat py-2">
         <div class="empty-state">
             <i class="bi bi-search text-muted"></i>
-            <h5 class="fw-semibold text-muted">No assets found</h5>
+            <h5 class="fw-semibold text-muted">No assets or categories found</h5>
             <p class="text-muted mb-3">
                 Nothing matched "<strong>{{ query }}</strong>".<br>
-                Try a different tag, name, brand, or serial number.
+                Try a different category name, tag, vendor, brand, or serial number.
             </p>
             <a href="{% url 'assets:dashboard' %}" class="btn btn-swift btn-sm">
                 <i class="bi bi-house me-1"></i> Back to Dashboard
