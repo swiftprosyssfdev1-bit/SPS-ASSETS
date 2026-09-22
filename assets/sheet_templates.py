@@ -124,9 +124,7 @@ SHEET_TEMPLATES = {
     ),
 
     "inside cupboard": _cols(
-        "Internal Hard disk", "Hard Disk Size", "Hard Disk S.No",
-        "Conditions", None, "Updated", "Internal HDD", "Size", "S.No",
-        "Conditions",
+        "Item / Description", "Asset Tag", "Serial No.", "Status", "Location / Storage Notes"
     ),
 
     "it vendor": _cols(

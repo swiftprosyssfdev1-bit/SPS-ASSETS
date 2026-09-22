@@ -34,6 +34,15 @@
 <div class="card card-stat p-4 mx-auto" style="max-width: 720px;">
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
+        <label class="form-label fw-semibold">Branch</label>
+        <select name="branch" class="form-select mb-3" required>
+            <option value="">Select a branch…</option>
+            {% for b in branches %}
+            <option value="{{ b.id }}" {% if selected_import_branch_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+        </select>
+        <div class="form-text mb-3 mt-n2">Every asset in this file will be assigned to this branch.</div>
+
         <label class="form-label fw-semibold">Choose file (.csv, .txt, or .xlsx)</label>
         <input type="file" name="import_file" accept=".csv,.txt,.xlsx,.xls" class="form-control mb-3" required>
         <button type="submit" class="btn btn-swift">

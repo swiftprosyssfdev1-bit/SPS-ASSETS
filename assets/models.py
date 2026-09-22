@@ -3,6 +3,62 @@ from django.conf import settings
 from django.utils import timezone
 
 
+class Branch(models.Model):
+    """A physical office/branch. Assets and Branch Admins are scoped to
+    one or more of these. New branches can be added at any time from the
+    UI (Super Admin only) — nothing about branches is hard-coded.
+
+    Field names/types here intentionally match the Branch model that was
+    already migrated into this project (0009_branch_asset_branch_userbranchaccess)
+    so this file doesn't require any destructive column rename."""
+    name = models.CharField(max_length=100, unique=True)
+    code = models.CharField(max_length=20, unique=True, blank=True, null=True,
+                             help_text="Short code, e.g. 'CHN' (auto-filled from name if left blank)")
+    status = models.BooleanField(default=True, help_text="Uncheck to retire this branch without deleting it")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "Branches"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            self.code = self.name.strip().upper()[:20].replace(" ", "")
+        super().save(*args, **kwargs)
+
+    @property
+    def is_active(self):
+        """Convenience alias — the DB column is `status` (boolean), this
+        just reads nicer everywhere else in the app that talks about
+        active/retired branches."""
+        return self.status
+
+
+class UserBranchAccess(models.Model):
+    """Marks a user as a Branch Admin (as opposed to the Super Admin) and
+    records which branch(es) they may access. A user with no row here is
+    treated as a Super Admin only if they are also a Django superuser;
+    every other user with no row has no branch access at all.
+
+    Matches the UserBranchAccess model already migrated into this project
+    (0009_branch_asset_branch_userbranchaccess) — same table, same
+    related_name — so no schema changes are required here."""
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="branch_access",
+    )
+    branches = models.ManyToManyField(Branch, blank=True, related_name="admins")
+
+    class Meta:
+        verbose_name_plural = "User Branch Access"
+
+    def __str__(self):
+        return f"Branch Admin: {self.user.get_username()}"
+
+
 class AssetCategory(models.Model):
     """e.g. Workstation, Monitor, Keyboard, Mouse, UPS, Bluetooth, Hard Disk,
     Software/OS, A/C, Biometrics, Vendor, Project, etc."""
@@ -40,11 +96,19 @@ class Asset(models.Model):
         ("resolved", "Resolved"),
         ("running", "Running"),      # Project Details sheet's Status column
         ("stopped", "Stopped"),      # Project Details sheet's Status column
+        ("completed", "Completed"),  # Project Details sheet's Status column
         ("other", "Other"),
     ]
 
     category = models.ForeignKey(
         AssetCategory, on_delete=models.PROTECT, related_name="assets"
+    )
+    branch = models.ForeignKey(
+        Branch, on_delete=models.PROTECT, related_name="assets",
+        null=True, blank=True,
+        help_text="Branch this asset belongs to. Null only for legacy rows "
+                   "imported before branches existed — assign one from the "
+                   "Edit page.",
     )
     asset_tag = models.CharField(
         max_length=50, unique=True,
@@ -88,6 +152,7 @@ class Asset(models.Model):
         indexes = [
             models.Index(fields=["category", "is_active", "status"]),
             models.Index(fields=["category", "is_active"]),
+            models.Index(fields=["branch", "is_active"]),
         ]
 
     def __str__(self):

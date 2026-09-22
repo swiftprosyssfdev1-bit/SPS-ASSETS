@@ -1,0 +1,18 @@
+# Generated manually on 2026-09-22
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('assets', '0010_align_branch_userbranchaccess'),
+    ]
+
+    operations = [
+        migrations.AlterField(
+            model_name='asset',
+            name='status',
+            field=models.CharField(choices=[('working', 'Working'), ('not_working', 'Not Working'), ('idle', 'Idle / In Cupboard'), ('scrap', 'Scrap / Destroyed'), ('missing', 'Missing'), ('service', 'Under Service'), ('active', 'Active'), ('inactive', 'Inactive'), ('open', 'Open'), ('resolved', 'Resolved'), ('running', 'Running'), ('stopped', 'Stopped'), ('completed', 'Completed'), ('other', 'Other')], default='working', max_length=20),
+        ),
+    ]

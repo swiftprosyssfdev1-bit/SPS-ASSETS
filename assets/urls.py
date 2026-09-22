@@ -17,9 +17,19 @@ urlpatterns = [
     path("category/add/", views.category_create, name="category_create"),
     path("category/<int:category_id>/", views.category_detail, name="category_detail"),
     path("asset/add/", views.asset_create, name="asset_create"),
+    path("asset/<int:asset_id>/", views.asset_detail, name="asset_detail"),
     path("asset/<int:asset_id>/edit/", views.asset_update, name="asset_update"),
     path("asset/<int:asset_id>/delete/", views.asset_delete, name="asset_delete"),
+    path("asset-lookup/", views.asset_lookup, name="asset_lookup"),
     path("search/", views.search_assets, name="search_assets"),
     path("search/suggestions/", views.search_suggestions, name="search_suggestions"),
     path("history/", views.history_list, name="history_list"),
+    # Branch management (Super Admin only)
+    path("branches/", views.branch_list, name="branch_list"),
+    path("branches/add/", views.branch_create, name="branch_create"),
+    path("branches/<int:branch_id>/edit/", views.branch_update, name="branch_update"),
+    # Branch Admin management (Super Admin only)
+    path("admins/", views.admin_list, name="admin_list"),
+    path("admins/add/", views.admin_create, name="admin_create"),
+    path("admins/<int:user_id>/edit/", views.admin_update, name="admin_update"),
 ]

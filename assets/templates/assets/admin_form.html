@@ -1,0 +1,47 @@
+{% extends "assets/base.html" %}
+{% block title %}{{ title }} - Asset Register{% endblock %}
+{% block content %}
+
+<div class="mb-4 mx-auto" style="max-width: 560px;">
+    <a href="{% url 'assets:admin_list' %}" class="btn-back">
+        <i class="bi bi-arrow-left"></i> Back to Branch Admins
+    </a>
+    <h3 class="fw-bold text-secondary mt-1">{{ title }}</h3>
+</div>
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 560px;">
+    <form method="post">
+        {% csrf_token %}
+        {% if not admin_user %}
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Username</label>
+            {{ form.username }}
+            {{ form.username.errors }}
+        </div>
+        {% endif %}
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Email</label>
+            {{ form.email }}
+            {{ form.email.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">
+                {% if admin_user %}{{ form.new_password.label }}{% else %}Temporary Password{% endif %}
+            </label>
+            {% if admin_user %}{{ form.new_password }}{% else %}{{ form.password }}{% endif %}
+            {{ form.password.errors }}{{ form.new_password.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold d-block">Branches this admin can manage</label>
+            {{ form.branches }}
+            {{ form.branches.errors }}
+        </div>
+        <div class="form-check mb-3">
+            {{ form.is_active }}
+            <label class="form-check-label">Account active</label>
+        </div>
+        <button type="submit" class="btn btn-swift px-4">Save</button>
+    </form>
+</div>
+
+{% endblock %}

@@ -9,6 +9,10 @@
             <i class="bi bi-arrow-left"></i> Back to Dashboard
         </a>
         <h3 class="fw-bold text-secondary mt-1">{{ category.name }}</h3>
+        <div class="text-muted small">
+            {% if selected_branch %}{{ selected_branch.name }} branch{% elif is_super_admin %}All branches{% endif %}
+            — {{ assets|length }} record{{ assets|length|pluralize }}
+        </div>
     </div>
     <a href="{% url 'assets:asset_create' %}?category={{ category.id }}" class="btn btn-swift">
         <i class="bi bi-plus-lg"></i> Add {% if is_info_register %}Record{% else %}Asset{% endif %}
@@ -20,40 +24,168 @@
         <table class="table mb-0 align-middle">
             <thead class="table-light">
                 <tr>
-                    {% if not is_info_register %}
+                    {% if is_cupboard %}
+                    <th style="min-width: 240px;">Item / Description</th>
+                    <th>Asset Tag</th>
+                    <th>Serial No.</th>
+                    <th>Status</th>
+                    <th>Location / Storage Notes</th>
+                    {% elif is_vendor %}
                     <th>Tag</th>
-                    <th>Name</th>
+                    <th>Vendor Name</th>
+                    <th>Types of Service</th>
+                    <th>Contact Person</th>
+                    <th>Mobile No</th>
+                    <th>Status</th>
+                    {% elif is_employee %}
+                    <th>Employee ID</th>
+                    <th>Employee Name</th>
+                    <th>Status</th>
+                    {% elif is_incident %}
+                    <th>Incident ID</th>
+                    <th>Incident Type</th>
+                    <th>Incident Description</th>
+                    <th>Start Date & Time</th>
+                    <th>End Date & Time</th>
+                    <th>Status</th>
+                    {% elif is_project_details %}
+                    <th>Project Name</th>
+                    <th>Status</th>
+                    {% elif is_info_register %}
+                    <th>{{ tag_label }}</th>
+                    {% if not hide_name %}<th>Name</th>{% endif %}
+                    <th>Status</th>
+                    {% if list_summary_field %}<th>{{ list_summary_field.label }}</th>{% endif %}
+                    {% else %}
+                    <th>{{ tag_label }}</th>
+                    {% if not hide_name %}<th>Name</th>{% endif %}
                     <th>Brand / Model</th>
                     <th>Serial No.</th>
                     <th>Status</th>
                     <th>Current User / Location</th>
                     <th>Previous User / Location</th>
                     {% endif %}
-                    {% for field in category_fields %}
-                    <th>{{ field.label }}</th>
-                    {% endfor %}
-                    <th></th>
+                    {% if show_branch_column %}<th>Branch</th>{% endif %}
+                    <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for a in assets %}
                 <tr>
-                    {% if not is_info_register %}
+                    {% if is_cupboard %}
+                    <td class="fw-semibold">
+                        <i class="bi bi-box-seam me-2 text-primary"></i>{{ a.name }}
+                        {% if a.brand and a.brand != 'Cupboard Storage' and a.brand != 'Accessory' %}
+                        <span class="badge bg-light text-muted border ms-1 font-monospace">{{ a.brand }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge bg-light text-dark border font-monospace">{{ a.asset_tag }}</span>
+                    </td>
+                    <td>
+                        {% if a.serial_number %}
+                        <code class="text-dark">{{ a.serial_number }}</code>
+                        {% else %}
+                        <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span>
+                    </td>
+                    <td class="small text-muted">
+                        {% if a.notes %}
+                            {{ a.notes }}
+                        {% else %}
+                            <span class="text-secondary"><i class="bi bi-geo-alt me-1"></i>Inside Cupboard</span>
+                        {% endif %}
+                    </td>
+                    {% elif is_vendor %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    <td>{{ a.name }}</td>
+                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td>{{ a.extra_details|get_item:"Types of Service"|default:"—" }}</td>
+                    <td>{{ a.extra_details|get_item:"Contact Person"|default:"—" }}</td>
+                    <td>{{ a.extra_details|get_item:"Mobile No"|default:"—" }}</td>
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    {% elif is_employee %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td>
+                        {% with emp_st=a.extra_details|get_item:"Status"|default:a.get_status_display %}
+                            {% if emp_st == 'Active' or emp_st == 'active' %}
+                                <span class="badge badge-status-active">Active</span>
+                            {% elif emp_st == 'Resigned' or emp_st == 'resigned' %}
+                                <span class="badge badge-status-resigned">Resigned</span>
+                            {% elif emp_st == 'Not Added' or emp_st == 'not added' %}
+                                <span class="text-muted small">—</span>
+                            {% elif emp_st == 'Inactive' or emp_st == 'inactive' %}
+                                <span class="badge badge-status-inactive">Inactive</span>
+                            {% else %}
+                                <span class="badge badge-status-{{ a.status }}">{{ emp_st }}</span>
+                            {% endif %}
+                        {% endwith %}
+                    </td>
+                    {% elif is_incident %}
+                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
+                    <td><span class="badge bg-light text-dark border">{{ a.extra_details|get_item:"Incident Type"|default:"Incident" }}</span></td>
+                    <td style="max-width: 320px;" class="text-wrap">{{ a.extra_details|get_item:"Incident Description"|default:"—" }}</td>
+                    <td class="text-nowrap small text-muted">{{ a.extra_details|get_item:"Start Date&Time"|default:"—" }}</td>
+                    <td class="text-nowrap small text-muted">{{ a.extra_details|get_item:"End Date&Time"|default:"—" }}</td>
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    {% elif is_project_details %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    {% elif is_info_register %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    {% if list_summary_field %}
+                    <td>
+                        {% with summary_val=a.extra_details|get_item:list_summary_field.name %}
+                            {% with resolved_asset=summary_val|resolve_asset %}
+                                {% if resolved_asset %}
+                                <a href="{% url 'assets:asset_detail' resolved_asset.id %}" class="badge bg-primary-subtle text-primary border text-decoration-none" title="View {{ resolved_asset.asset_tag }}">
+                                    <i class="bi bi-link-45deg me-1"></i>{{ summary_val }}
+                                </a>
+                                {% else %}
+                                {{ summary_val|default:"—" }}
+                                {% endif %}
+                            {% endwith %}
+                        {% endwith %}
+                    </td>
+                    {% endif %}
+                    {% elif is_hard_disk %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    <td>{{ a.extra_details|get_item:"Hard Disk Name"|default:a.name }}</td>
+                    <td>{{ a.brand }} {{ a.model_number }}</td>
+                    <td>{{ a.serial_number|default:"—" }}</td>
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    <td>{{ a.current_assigned_to|default:"—" }} {% if a.current_location %}/ {{ a.current_location }}{% endif %}</td>
+                    <td class="text-muted">{{ a.previous_assigned_to|default:"—" }} {% if a.previous_location %}/ {{ a.previous_location }}{% endif %}</td>
+                    {% else %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
                     <td>{{ a.brand }} {{ a.model_number }}</td>
                     <td>{{ a.serial_number|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     <td>{{ a.current_assigned_to|default:"—" }} {% if a.current_location %}/ {{ a.current_location }}{% endif %}</td>
                     <td class="text-muted">{{ a.previous_assigned_to|default:"—" }} {% if a.previous_location %}/ {{ a.previous_location }}{% endif %}</td>
                     {% endif %}
-                    {% for field in category_fields %}
-                    <td>{{ a.extra_details|get_item:field.name|default:"—" }}</td>
-                    {% endfor %}
-                    <td><a href="{% url 'assets:asset_update' a.id %}" class="btn btn-sm btn-outline-secondary">Edit</a></td>
+                    {% if show_branch_column %}
+                    <td>
+                        {% if a.branch %}
+                        <span class="badge bg-light text-dark border">{{ a.branch.name }}</span>
+                        {% else %}
+                        <span class="badge bg-warning-subtle text-warning-emphasis border">Unassigned</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                    <td class="text-end">
+                        <a href="{% url 'assets:asset_detail' a.id %}" class="btn btn-sm btn-outline-secondary">View</a>
+                        <a href="{% url 'assets:asset_update' a.id %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="{{ category_fields|length|add:8 }}" class="text-muted text-center py-3">No records in this category yet.</td></tr>
+                <tr><td colspan="8" class="text-muted text-center py-4">No records in this branch/category yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -61,4 +193,3 @@
 </div>
 
 {% endblock %}
-

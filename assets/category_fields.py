@@ -95,6 +95,15 @@ CATEGORY_FIELDS = {
         {"name": "Details 1", "label": "Details 1", "type": "text"},
         {"name": "Details 2", "label": "Details 2", "type": "text"},
     ],
+    # Inside Cupboard uses a flexible 4-column layout (no rigid template).
+    # These fields appear in the Add/Edit form; the detail table uses the
+    # special is_cupboard branch in category_detail.html instead.
+    "inside cupboard": [
+        {"name": "item_type", "label": "Item Type", "type": "select",
+         "options": ["HDD", "RAM", "Accessory / Box", "Cable", "Peripheral", "Other"]},
+        {"name": "capacity_size", "label": "Capacity / Size", "type": "text"},
+        {"name": "condition_notes", "label": "Condition / Notes", "type": "text"},
+    ],
 }
 
 
@@ -130,6 +139,71 @@ EMPLOYEE_MAIN_COLUMNS = 3
 
 def is_employee_category(name):
     return str(name or "").strip().lower() in {"employee", "employee list"}
+
+
+# Workstation fields that should render as a searchable combo box (type to
+# search an existing asset, pick it, its Tag gets stored) instead of a
+# free-text box — keyed by the field's normalized label so it matches
+# regardless of the exact header text a sheet template gave it (e.g.
+# "CPU Number" / "Cpu Number" / "CPU_Number" all normalize the same way).
+# Value = the AssetCategory name to search within.
+WORKSTATION_LOOKUP_FIELDS = {
+    "cpu number": "CPU / System Unit",
+    "monitor number": "Monitor",
+    "keyboard number": "Keyboard",
+    "mouse number": "Mouse",
+    "ups no": "UPS",
+    "ups no.": "UPS",
+    "employee id": "Employee",
+}
+
+
+def workstation_lookup_category(field_label):
+    """Returns the AssetCategory name to search for this Workstation field,
+    or None if it's a plain text field."""
+    return WORKSTATION_LOOKUP_FIELDS.get(_normalize_field_name(field_label))
+
+
+# ---------------------------------------------------------------------------
+# Per-category "common field" visibility for the Add/Edit Asset form.
+#
+# Category, Branch, Asset Tag, Name, Notes and Active are universal — every
+# asset needs them, so they always show. Everything below is hardware/
+# tracking detail that only some categories actually use; this map says
+# exactly which of those to show for each category. A category not listed
+# here falls back to DEFAULT_COMMON_FIELDS (the full physical-asset set),
+# so a brand-new category still gets a sensible form until it's tailored
+# here. Edit this dict to change what a given category's form shows.
+# ---------------------------------------------------------------------------
+
+DEFAULT_COMMON_FIELDS = [
+    "status", "brand", "model_number", "serial_number",
+    "current_assigned_to", "current_location", "linked_workstation",
+    "purchase_date", "last_service_date",
+]
+
+COMMON_FIELDS_BY_CATEGORY = {
+    # Plain information registers — no physical hardware to track.
+    "employee": ["status"],
+    "employee list": ["status"],
+    "it vendor": ["status"],
+    "incident register": ["status"],
+    "project details": ["status"],
+    "project backup": ["status"],
+    # These have their own detail fields (processor/RAM, license type, etc.)
+    # via CATEGORY_FIELDS/sheet templates, so they only need Status plus
+    # who/where it's assigned — not Brand/Model/Serial/Purchase/Service.
+    "workstation": ["status", "current_assigned_to", "current_location"],
+    "cpu / system unit": ["status", "current_assigned_to", "current_location"],
+    "software / os license": ["status", "current_assigned_to"],
+}
+
+
+def get_common_fields(category_name):
+    """Which of the toggleable common Asset fields to show on the
+    Add/Edit form for this category name."""
+    key = str(category_name or "").strip().lower()
+    return COMMON_FIELDS_BY_CATEGORY.get(key, DEFAULT_COMMON_FIELDS)
 
 
 def employee_repeat_keys_in_use(category):
@@ -191,13 +265,18 @@ def get_category_fields(category):
         if fields:
             return fields
 
+    # If this category is explicitly listed in CATEGORY_FIELDS, use that
+    # definition (skipping raw extra_details discovery). This lets us give
+    # Inside Cupboard — and similar categories — a curated, clean form
+    # instead of surfacing whatever raw Excel column names were imported.
+    curated = CATEGORY_FIELDS.get(category.name.strip().lower(), [])
+    if curated:
+        return [f for f in curated if not _is_sensitive_field(f["name"])]
+
     discovered = _discover_fields_from_data(category)
     if discovered:
         return discovered
-    return [
-        f for f in CATEGORY_FIELDS.get(category.name.strip().lower(), [])
-        if not _is_sensitive_field(f["name"])
-    ]
+    return []
 
 
 def _discover_fields_from_data(category):

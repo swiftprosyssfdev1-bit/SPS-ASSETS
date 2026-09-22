@@ -2,8 +2,10 @@ import re
 from io import BytesIO
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth import get_user_model
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
+from django.core.exceptions import PermissionDenied
 from django.db import transaction, IntegrityError
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
@@ -13,10 +15,13 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .forms import AssetForm, AssetCategoryForm
-from .models import Asset, AssetCategory, AssetHistory
+from .forms import (
+    AssetForm, AssetCategoryForm, BranchForm, BranchAdminCreateForm, BranchAdminEditForm,
+)
+from .models import Asset, AssetCategory, AssetHistory, Branch, UserBranchAccess
 from .category_fields import (
     get_category_fields, is_employee_category, EMPLOYEE_MAIN_COLUMNS,
+    workstation_lookup_category, get_common_fields,
 )
 from .sheet_templates import get_template_for_category
 from .import_utils import (
@@ -24,15 +29,19 @@ from .import_utils import (
     parse_uploaded_workbook_sheets, validate_workbook_sheets,
     serialize_for_session, deserialize_from_session, _normalize_header,
 )
+from .permissions import (
+    is_super_admin, is_branch_admin, super_admin_required, admin_required,
+    get_accessible_branches, can_access_branch, require_branch_access,
+    resolve_selected_branch, filter_assets_to_branch,
+)
 
 from django.conf import settings
 
-admin_required = user_passes_test(
-    lambda u: u.is_staff or u.is_superuser, login_url="assets:dashboard"
-)
-superuser_required = user_passes_test(
-    lambda u: u.is_active and u.is_superuser, login_url="assets:dashboard"
-)
+User = get_user_model()
+
+# Backwards-compatible aliases (kept so nothing else in this file has to
+# change its decorator name): superuser_required === Super Admin only.
+superuser_required = super_admin_required
 
 
 class BrandedLoginView(LoginView):
@@ -105,12 +114,24 @@ ATTENTION_STATUSES = ["not_working", "service", "missing"]
 
 @login_required
 def dashboard(request):
+    selected_branch, accessible_branches = resolve_selected_branch(request)
+    if not is_super_admin(request.user) and not accessible_branches.exists():
+        messages.warning(
+            request,
+            "Your account has no branches assigned yet. Contact the Super Admin.",
+        )
+
+    if selected_branch is not None:
+        branch_filter = Q(assets__branch=selected_branch)
+    else:
+        branch_filter = Q(assets__branch__in=accessible_branches)
+
     categories = (
         AssetCategory.objects.annotate(
-            total=Count("assets", filter=Q(assets__is_active=True)),
+            total=Count("assets", filter=Q(assets__is_active=True) & branch_filter),
             not_working=Count(
                 "assets",
-                filter=Q(assets__is_active=True) & Q(assets__status__in=ATTENTION_STATUSES),
+                filter=Q(assets__is_active=True) & Q(assets__status__in=ATTENTION_STATUSES) & branch_filter,
             ),
         ).order_by("name")
     )
@@ -148,12 +169,18 @@ def dashboard(request):
         for cat in grouped_categories:
             main_categories.append(cat)
 
-    total_records = Asset.objects.filter(is_active=True).count()
+    branch_scoped = Asset.objects.filter(is_active=True)
+    branch_scoped = filter_assets_to_branch(
+        branch_scoped, selected_branch, accessible_branches,
+        include_unassigned=is_super_admin(request.user) and selected_branch is None,
+    )
+
+    total_records = branch_scoped.count()
     non_asset_ids = [
         c.id for c in AssetCategory.objects.all()
         if c.name.strip().lower() in NON_ASSET_CATEGORIES
     ]
-    real_assets = Asset.objects.filter(is_active=True).exclude(category_id__in=non_asset_ids)
+    real_assets = branch_scoped.exclude(category_id__in=non_asset_ids)
     total_assets = real_assets.count()
     status_breakdown = (
         real_assets
@@ -163,7 +190,8 @@ def dashboard(request):
     )
     recent_changes = (
         AssetHistory.objects
-        .select_related("asset", "changed_by")
+        .select_related("asset", "changed_by", "asset__branch")
+        .filter(asset__in=branch_scoped)
         # Dashboard is a clean, at-a-glance summary — leave out entries for
         # assets whose tag was auto-suffixed to dodge a collision during
         # import (e.g. "7" and "7-2" from two stacked vendor lists in one
@@ -182,6 +210,9 @@ def dashboard(request):
         "status_breakdown": status_breakdown,
         "recent_changes": recent_changes,
         "allow_clear_all": allow_clear_all,
+        "accessible_branches": accessible_branches,
+        "selected_branch": selected_branch,
+        "is_super_admin": is_super_admin(request.user),
     }
     return render(request, "assets/dashboard.html", context)
 
@@ -189,7 +220,85 @@ def dashboard(request):
 # Categories that are plain information registers — they don't represent
 # physical assets so hardware-specific columns (Status, Brand, Serial No,
 # Asset Tag, Current/Previous User/Location) are hidden in the UI and export.
-INFO_REGISTER_CATEGORIES = {"it vendor", "incident register", "employee", "employee list"}
+INFO_REGISTER_CATEGORIES = {
+    "it vendor", "incident register", "employee", "employee list", "workstation",
+    "cpu / system unit", "software / os license", "project details", "project backup",
+}
+
+# Categories whose legacy sheet has no real "Name"-like column at all (just
+# a Tag/ID + Brand/Type columns) — Asset.name for these is only ever the
+# auto-generated "{Category} {tag}" filler (see import_utils._cell_text /
+# the "Name" fallback), so the list table shouldn't show it as if it were
+# real data. The Tag + Brand/Model (or the category's own extra fields)
+# already say everything there is to say about these rows.
+NO_REAL_NAME_CATEGORIES = {
+    "keyboard", "monitor", "mouse", "ups", "workstation", "software / os license",
+}
+
+# The list table's Tag column reads "Tag" by default. For categories whose
+# own sheet had its own ID-column name, show that instead (e.g. Hard Disk's
+# "Hard disk Number" column, Keyboard's "Keyboard Id" column) — it's the
+# same value either way, just labeled the way that category's own data
+# actually calls it.
+TAG_LABEL_OVERRIDES = {
+    "hard disk": "Hard Disk Number",
+    "keyboard": "Keyboard Id",
+    "monitor": "Monitor Id",
+    "mouse": "Mouse Id",
+    "ups": "UPS Id",
+}
+
+
+# Fields that must never be the list-table summary column, even though
+# they're not duplicates of Tag/Name — these are secrets/credentials that
+# should only be visible on the asset's own View/Edit page, not in the
+# shared list table everyone sees at a glance.
+LIST_SUMMARY_EXCLUDED_FIELDS = {
+    "password", "product key", "cd key", "license key", "va rating",
+}
+
+# Explicit "best" column to show in the list table for a category, when the
+# first-available field (after skipping Tag/Name duplicates and the names
+# above) still wouldn't be the most useful thing to show at a glance.
+LIST_SUMMARY_FIELD_OVERRIDES = {
+    "cpu / system unit": "Processor",
+    "software / os license": "Type",
+    "project backup": "Hard disk Name",
+}
+
+
+def _list_summary_field(category, category_fields):
+    """Pick one category field to show as the extra list-table column for an
+    info-register-style category. Skips fields that just duplicate the Tag
+    column (e.g. "Workstation ID", "System No" — these map to asset_tag on
+    import via SHEET_HEADER_OVERRIDES, so showing them again next to Tag is
+    redundant) and skips anything sensitive (Password, keys, etc.) — those
+    stay hidden until someone opens View/Edit on that specific record."""
+    from .import_utils import SHEET_HEADER_OVERRIDES, HEADER_ALIASES, _normalize_header
+    from .sheet_templates import CATEGORY_TO_TEMPLATE
+
+    cat_norm = category.name.strip().lower()
+    template_key = CATEGORY_TO_TEMPLATE.get(cat_norm)
+    overrides = SHEET_HEADER_OVERRIDES.get(template_key, {})
+
+    override_label = LIST_SUMMARY_FIELD_OVERRIDES.get(cat_norm)
+    if override_label:
+        for f in category_fields:
+            if f["label"] == override_label:
+                return f
+
+    def duplicates_tag_or_name(field):
+        norm = _normalize_header(field["label"])
+        mapped = overrides.get(norm) or HEADER_ALIASES.get(norm)
+        return mapped in ("asset_tag", "name")
+
+    def is_sensitive_for_list(field):
+        return _normalize_header(field["label"]) in LIST_SUMMARY_EXCLUDED_FIELDS
+
+    for f in category_fields:
+        if not duplicates_tag_or_name(f) and not is_sensitive_for_list(f):
+            return f
+    return None
 
 # Records that live in the register but are NOT physical assets. They are left
 # out of the dashboard's "Total Active Assets" and status cards.
@@ -199,11 +308,26 @@ NON_ASSET_CATEGORIES = {"it vendor", "incident register", "employee", "employee 
 # Status (no brand, model, serial, location, purchase date ...).
 EMPLOYEE_STATUS_CHOICES = [("active", "Active"), ("inactive", "Inactive"), ("other", "Other")]
 
+# Project Details records aren't physical assets — their Status column just
+# tracks whether the project is Active, Completed, or Stopped.
+PROJECT_STATUS_CHOICES = [("active", "Active"), ("completed", "Completed"), ("stopped", "Stopped")]
+
 
 def _employee_form_setup(form, instance=None):
     """Limit the Status dropdown to people-appropriate values (keeping the
     record's current value so editing never silently changes it)."""
     choices = list(EMPLOYEE_STATUS_CHOICES)
+    current = getattr(instance, "status", None)
+    if current and current not in dict(choices):
+        choices.append((current, dict(Asset.STATUS_CHOICES).get(current, current)))
+    form.fields["status"].choices = choices
+
+
+def _project_form_setup(form, instance=None):
+    """Limit the Status dropdown to Active / Completed / Stopped for Project
+    Details records (keeping the record's current value so editing never
+    silently changes it)."""
+    choices = list(PROJECT_STATUS_CHOICES)
     current = getattr(instance, "status", None)
     if current and current not in dict(choices):
         choices.append((current, dict(Asset.STATUS_CHOICES).get(current, current)))
@@ -230,13 +354,44 @@ def _sync_employee_extra_details(asset, extra, old_status=None):
 @login_required
 def category_detail(request, category_id):
     category = get_object_or_404(AssetCategory, pk=category_id)
-    assets = category.assets.filter(is_active=True).order_by("asset_tag")
-    is_info_register = category.name.strip().lower() in INFO_REGISTER_CATEGORIES
+    selected_branch, accessible_branches = resolve_selected_branch(request)
+
+    assets = category.assets.filter(is_active=True).select_related("branch")
+    assets = filter_assets_to_branch(
+        assets, selected_branch, accessible_branches,
+        include_unassigned=is_super_admin(request.user) and selected_branch is None,
+    )
+    assets = assets.order_by("asset_tag")
+
+    cat_norm = category.name.strip().lower()
+    is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
+    is_employee = cat_norm in ("employee", "employee list")
+    is_incident = cat_norm == "incident register"
+    is_cupboard = cat_norm in ("inside cupboard", "inside the cupboard")
+    is_project_details = cat_norm == "project details"
+    is_hard_disk = cat_norm == "hard disk"
+    hide_name = cat_norm in NO_REAL_NAME_CATEGORIES
+    tag_label = TAG_LABEL_OVERRIDES.get(cat_norm, "Tag")
+    category_fields = get_category_fields(category)
+    list_summary_field = _list_summary_field(category, category_fields) if (is_info_register and not is_employee and not is_incident and not is_project_details) else None
     return render(request, "assets/category_detail.html", {
         "category": category,
         "assets": assets,
-        "category_fields": get_category_fields(category),
+        "category_fields": category_fields,
+        "list_summary_field": list_summary_field,
         "is_info_register": is_info_register,
+        "is_employee": is_employee,
+        "is_incident": is_incident,
+        "is_cupboard": is_cupboard,
+        "is_project_details": is_project_details,
+        "is_hard_disk": is_hard_disk,
+        "hide_name": hide_name,
+        "tag_label": tag_label,
+        "is_vendor": cat_norm == "it vendor",
+        "accessible_branches": accessible_branches,
+        "selected_branch": selected_branch,
+        "is_super_admin": is_super_admin(request.user),
+        "show_branch_column": selected_branch is None,
     })
 
 
@@ -248,23 +403,67 @@ def _extract_extra_details(request, category_fields):
     return extra
 
 
+def _build_category_form_config():
+    """Per-category config for the Add/Edit Asset form's JavaScript, so
+    switching the Category dropdown updates which fields show instantly
+    with no page reload: which common fields apply, and that category's
+    own extra fields (with type/options/workstation-lookup info)."""
+    config = {}
+    for cat in AssetCategory.objects.all():
+        cat_key = cat.name.strip().lower()
+        employee_form = cat_key in {"employee", "employee list"}
+        extra_fields = []
+        if not employee_form:
+            for f in get_category_fields(cat):
+                entry = {"name": f["name"], "label": f["label"], "type": f["type"]}
+                if f.get("options"):
+                    entry["options"] = f["options"]
+                lookup = workstation_lookup_category(f["label"])
+                if lookup:
+                    entry["lookup_category"] = lookup
+                extra_fields.append(entry)
+        config[str(cat.pk)] = {
+            "name": cat.name,
+            "common_fields": get_common_fields(cat.name),
+            "extra_fields": extra_fields,
+            "employee_form": employee_form,
+            "tag_label": "Employee ID" if employee_form else "Asset Tag",
+            "name_label": "Employee Name" if employee_form else "Name",
+            "asset_tag_help": "" if employee_form else "Unique ID, e.g. WS001, M009, K014, U006",
+        }
+    return config
+
+
 @login_required
 def asset_create(request):
+    accessible_branches = get_accessible_branches(request.user)
+    if not accessible_branches.exists():
+        messages.error(request, "You don't have any branches assigned yet — contact the Super Admin.")
+        return redirect("assets:dashboard")
+
     initial = {}
     category_id = request.GET.get("category") or request.POST.get("category")
     category = None
     if category_id:
         initial["category"] = category_id
         category = AssetCategory.objects.filter(pk=category_id).first()
+    selected_branch, _ = resolve_selected_branch(request)
+    if selected_branch is not None:
+        initial["branch"] = selected_branch.pk
+    elif accessible_branches.count() == 1:
+        initial["branch"] = accessible_branches.first().pk
     category_fields = get_category_fields(category)
     cat_key = category.name.strip().lower() if category else ""
     employee_form = cat_key in {"employee", "employee list"}
+    project_form = cat_key == "project details"
     is_info_register = cat_key in INFO_REGISTER_CATEGORIES
 
     if request.method == "POST":
-        form = AssetForm(request.POST)
+        form = AssetForm(request.POST, accessible_branches=accessible_branches)
         if employee_form:
             _employee_form_setup(form)
+        elif project_form:
+            _project_form_setup(form)
         if form.is_valid():
             asset = form.save(commit=False)
             asset.updated_by = request.user
@@ -275,33 +474,50 @@ def asset_create(request):
             messages.success(request, f"Asset {asset.asset_tag} added.")
             return redirect("assets:category_detail", category_id=asset.category_id)
     else:
-        form = AssetForm(initial=initial)
+        form = AssetForm(initial=initial, accessible_branches=accessible_branches)
         if employee_form:
             _employee_form_setup(form)
+            form.initial.setdefault("status", "active")
+        elif project_form:
+            _project_form_setup(form)
             form.initial.setdefault("status", "active")
 
     return render(request, "assets/asset_form.html", {
         "form": form, "title": f"Add {category.name}" if category else "Add Asset",
         "category": category, "category_fields": category_fields,
         "employee_form": employee_form, "is_info_register": is_info_register,
+        "workstation_lookup_category": workstation_lookup_category,
+        "is_workstation": cat_key == "workstation",
+        "category_form_config": _build_category_form_config(),
+        "asset_extra_details": {},
     })
 
 
 @login_required
 def asset_update(request, asset_id):
     asset = get_object_or_404(Asset, pk=asset_id)
+    require_branch_access(request.user, asset.branch)
+    accessible_branches = get_accessible_branches(request.user)
+
     category_fields = get_category_fields(asset.category)
     cat_key = asset.category.name.strip().lower()
     employee_form = cat_key in {"employee", "employee list"}
+    project_form = cat_key == "project details"
     is_info_register = cat_key in INFO_REGISTER_CATEGORIES
     old_status = asset.status
 
     if request.method == "POST":
-        form = AssetForm(request.POST, instance=asset)
+        form = AssetForm(request.POST, instance=asset, accessible_branches=accessible_branches)
         if employee_form:
             _employee_form_setup(form, instance=Asset.objects.get(pk=asset.pk))
+        elif project_form:
+            _project_form_setup(form, instance=Asset.objects.get(pk=asset.pk))
         if form.is_valid():
             updated = form.save(commit=False)
+            # Re-check: the branch the form resolved to must still be one
+            # this user may touch (belt-and-braces on top of the form's own
+            # queryset restriction, in case instance.branch was swapped).
+            require_branch_access(request.user, updated.branch)
             updated.updated_by = request.user
             category_fields = get_category_fields(updated.category)
             updated.extra_details = _extract_extra_details(request, category_fields)
@@ -314,20 +530,54 @@ def asset_update(request, asset_id):
             messages.success(request, f"Asset {updated.asset_tag} updated.")
             return redirect("assets:category_detail", category_id=updated.category_id)
     else:
-        form = AssetForm(instance=asset)
+        form = AssetForm(instance=asset, accessible_branches=accessible_branches)
         if employee_form:
             _employee_form_setup(form, instance=asset)
+        elif project_form:
+            _project_form_setup(form, instance=asset)
 
     return render(request, "assets/asset_form.html", {
         "form": form, "title": f"Edit Asset — {asset.asset_tag}", "asset": asset,
         "category": asset.category, "category_fields": category_fields,
         "employee_form": employee_form, "is_info_register": is_info_register,
+        "workstation_lookup_category": workstation_lookup_category,
+        "is_workstation": cat_key == "workstation",
+        "category_form_config": _build_category_form_config(),
+        "asset_extra_details": asset.extra_details or {},
+    })
+
+
+@login_required
+def asset_detail(request, asset_id):
+    """Read-only 'View' page — the complete record, organized into
+    sections, per the 'don't overload the list table' requirement."""
+    asset = get_object_or_404(Asset, pk=asset_id)
+    require_branch_access(request.user, asset.branch)
+    category_fields = get_category_fields(asset.category)
+    detail_fields = [
+        {"label": f["label"], "value": asset.extra_details.get(f["name"], "")}
+        for f in category_fields
+    ]
+    cat_norm = asset.category.name.strip().lower()
+    is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
+    
+    from .relations import get_forward_relationships, get_reverse_relationships
+    forward_rels = get_forward_relationships(asset)
+    reverse_rels = get_reverse_relationships(asset)
+
+    return render(request, "assets/asset_detail.html", {
+        "asset": asset,
+        "detail_fields": detail_fields,
+        "is_info_register": is_info_register,
+        "forward_relationships": forward_rels,
+        "reverse_relationships": reverse_rels,
     })
 
 
 @login_required
 def asset_delete(request, asset_id):
     asset = get_object_or_404(Asset, pk=asset_id)
+    require_branch_access(request.user, asset.branch)
     if request.method == "POST":
         category_id = asset.category_id
         asset.is_active = False
@@ -336,6 +586,52 @@ def asset_delete(request, asset_id):
         messages.success(request, f"Asset {asset.asset_tag} deactivated.")
         return redirect("assets:category_detail", category_id=category_id)
     return render(request, "assets/asset_confirm_delete.html", {"asset": asset})
+
+
+@login_required
+def asset_lookup(request):
+    """JSON endpoint powering the Workstation page's searchable combo
+    boxes (requirement 8). Returns existing assets of the requested
+    category whose tag/name/serial matches `q`, restricted to branches the
+    current user may see (requirement 9/11 — enforced here, not just by
+    hiding options in the UI)."""
+    category_name = request.GET.get("category", "").strip()
+    query = request.GET.get("q", "").strip()
+    branch_id = request.GET.get("branch", "").strip()
+
+    accessible_branches = get_accessible_branches(request.user)
+    if branch_id.isdigit() and accessible_branches.filter(pk=int(branch_id)).exists():
+        branches = accessible_branches.filter(pk=int(branch_id))
+    else:
+        branches = accessible_branches
+
+    if not category_name or not branches.exists():
+        return JsonResponse({"results": []})
+
+    if category_name.strip().lower() == "employee":
+        category_q = Q(category__name__in=["Employee", "Employee List"])
+    else:
+        category_q = Q(category__name__iexact=category_name)
+
+    qs = (
+        Asset.objects.filter(is_active=True, branch__in=branches)
+        .filter(category_q)
+    )
+    if query:
+        qs = qs.filter(
+            Q(asset_tag__icontains=query) | Q(name__icontains=query)
+            | Q(serial_number__icontains=query)
+        )
+    qs = qs.select_related("category")[:15]
+
+    results = [
+        {
+            "tag": a.asset_tag,
+            "label": f"{a.asset_tag} — {a.name}" + (f" — SN {a.serial_number}" if a.serial_number else ""),
+        }
+        for a in qs
+    ]
+    return JsonResponse({"results": results})
 
 
 @login_required
@@ -349,6 +645,117 @@ def category_create(request):
     else:
         form = AssetCategoryForm()
     return render(request, "assets/category_form.html", {"form": form, "title": "Add Category"})
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Branch management (Super Admin only)
+# ─────────────────────────────────────────────────────────────────────────
+
+@login_required
+@superuser_required
+def branch_list(request):
+    branches = Branch.objects.annotate(
+        asset_count=Count("assets", filter=Q(assets__is_active=True)),
+        admin_count=Count("admins", distinct=True),
+    ).order_by("name")
+    return render(request, "assets/branch_list.html", {"branches": branches})
+
+
+@login_required
+@superuser_required
+def branch_create(request):
+    if request.method == "POST":
+        form = BranchForm(request.POST)
+        if form.is_valid():
+            branch = form.save()
+            messages.success(request, f"Branch '{branch.name}' added.")
+            return redirect("assets:branch_list")
+    else:
+        form = BranchForm()
+    return render(request, "assets/branch_form.html", {"form": form, "title": "Add Branch"})
+
+
+@login_required
+@superuser_required
+def branch_update(request, branch_id):
+    branch = get_object_or_404(Branch, pk=branch_id)
+    if request.method == "POST":
+        form = BranchForm(request.POST, instance=branch)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"Branch '{branch.name}' updated.")
+            return redirect("assets:branch_list")
+    else:
+        form = BranchForm(instance=branch)
+    return render(request, "assets/branch_form.html", {
+        "form": form, "title": f"Edit Branch — {branch.name}", "branch": branch,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Branch Admin management (Super Admin only)
+# ─────────────────────────────────────────────────────────────────────────
+
+@login_required
+@superuser_required
+def admin_list(request):
+    admins = (
+        User.objects.filter(is_superuser=False, is_staff=True)
+        .select_related("branch_access")
+        .prefetch_related("branch_access__branches")
+        .order_by("username")
+    )
+    return render(request, "assets/admin_list.html", {"admins": admins})
+
+
+@login_required
+@superuser_required
+def admin_create(request):
+    if request.method == "POST":
+        form = BranchAdminCreateForm(request.POST)
+        if form.is_valid():
+            user = User.objects.create_user(
+                username=form.cleaned_data["username"],
+                email=form.cleaned_data["email"],
+                password=form.cleaned_data["password"],
+                is_staff=True,
+                is_active=form.cleaned_data["is_active"],
+            )
+            profile = UserBranchAccess.objects.create(user=user)
+            profile.branches.set(form.cleaned_data["branches"])
+            messages.success(request, f"Branch Admin '{user.username}' created.")
+            return redirect("assets:admin_list")
+    else:
+        form = BranchAdminCreateForm()
+    return render(request, "assets/admin_form.html", {"form": form, "title": "Add Branch Admin"})
+
+
+@login_required
+@superuser_required
+def admin_update(request, user_id):
+    admin_user = get_object_or_404(User, pk=user_id, is_superuser=False)
+    profile, _created = UserBranchAccess.objects.get_or_create(user=admin_user)
+
+    if request.method == "POST":
+        form = BranchAdminEditForm(request.POST)
+        if form.is_valid():
+            admin_user.email = form.cleaned_data["email"]
+            admin_user.is_active = form.cleaned_data["is_active"]
+            if form.cleaned_data["new_password"]:
+                admin_user.set_password(form.cleaned_data["new_password"])
+            admin_user.save()
+            profile.branches.set(form.cleaned_data["branches"])
+            messages.success(request, f"Branch Admin '{admin_user.username}' updated.")
+            return redirect("assets:admin_list")
+    else:
+        form = BranchAdminEditForm(initial={
+            "email": admin_user.email,
+            "is_active": admin_user.is_active,
+            "branches": profile.branches.all(),
+        })
+    return render(request, "assets/admin_form.html", {
+        "form": form, "title": f"Edit Branch Admin — {admin_user.username}", "admin_user": admin_user,
+    })
 
 
 EXPORT_COLUMNS = [
@@ -384,6 +791,8 @@ def _safe_sheet_name(name, used_names):
 
 @login_required
 def export_assets(request):
+    selected_branch, accessible_branches = resolve_selected_branch(request)
+
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -394,7 +803,12 @@ def export_assets(request):
     categories = AssetCategory.objects.all().order_by("name")
 
     for category in categories:
-        assets = category.assets.filter(is_active=True).order_by("asset_tag")
+        assets = category.assets.filter(is_active=True)
+        assets = filter_assets_to_branch(
+            assets, selected_branch, accessible_branches,
+            include_unassigned=is_super_admin(request.user) and selected_branch is None,
+        )
+        assets = assets.order_by("asset_tag")
         sheet_name = _safe_sheet_name(category.name, used_names)
         ws = wb.create_sheet(title=sheet_name)
 
@@ -498,10 +912,11 @@ def export_assets(request):
 
 
 SESSION_IMPORT_KEY = "bulk_import_rows"
+SESSION_IMPORT_BRANCH_KEY = "bulk_import_branch_id"
 
 
 @login_required
-@admin_required
+@superuser_required
 def bulk_import_sample(request):
     """Generates Asset_Import_Template.xlsx in code — one tab per legacy sheet
     (Employee_List, Workstation, CPU - System Unit, keyboard, Monitor, Mouse,
@@ -530,7 +945,7 @@ def bulk_import_sample(request):
 
 
 @login_required
-@admin_required
+@superuser_required
 def bulk_import(request):
     """GET: show the upload form. POST with a file: parse + validate and show a
     preview of every row (valid/invalid) before anything is saved."""
@@ -543,9 +958,14 @@ def bulk_import(request):
     row_warnings = None
     template_notices = None
 
+    branch_id = request.POST.get("branch") or request.GET.get("branch")
+    import_branch = Branch.objects.filter(pk=branch_id, status=True).first() if branch_id else None
+
     if request.method == "POST":
         uploaded_file = request.FILES.get("import_file")
-        if not uploaded_file:
+        if not import_branch:
+            messages.error(request, "Please select which branch this import belongs to.")
+        elif not uploaded_file:
             messages.error(request, "Please choose a file to upload.")
         else:
             filename = (uploaded_file.name or "").lower()
@@ -596,6 +1016,7 @@ def bulk_import(request):
             if results is not None:
                 valid_rows = serialize_for_session(results)
                 request.session[SESSION_IMPORT_KEY] = valid_rows
+                request.session[SESSION_IMPORT_BRANCH_KEY] = import_branch.id
                 summary = {
                     "total": len(results),
                     "valid": sum(1 for r in results if r["is_valid"]),
@@ -631,18 +1052,25 @@ def bulk_import(request):
         "row_warnings": row_warnings,
         "template_notices": template_notices,
         "import_columns": [label for label, _f, _r, _k in IMPORT_COLUMNS],
+        "branches": Branch.objects.filter(status=True).order_by("name"),
+        "selected_import_branch_id": import_branch.id if import_branch else None,
     })
 
 
 @login_required
-@admin_required
+@superuser_required
 def bulk_import_confirm(request):
     if request.method != "POST":
         return redirect("assets:bulk_import")
 
     rows = request.session.get(SESSION_IMPORT_KEY)
+    import_branch_id = request.session.get(SESSION_IMPORT_BRANCH_KEY)
+    import_branch = Branch.objects.filter(pk=import_branch_id, status=True).first() if import_branch_id else None
     if not rows:
         messages.error(request, "Nothing to import — please upload a file again.")
+        return redirect("assets:bulk_import")
+    if not import_branch:
+        messages.error(request, "No branch was selected for this import — please upload the file again and choose a branch.")
         return redirect("assets:bulk_import")
 
     fields_list = deserialize_from_session(rows)
@@ -658,6 +1086,7 @@ def bulk_import_confirm(request):
     for f in fields_list:
         f = dict(f)
         f["category_id"] = f.pop("category")
+        f["branch_id"] = import_branch.id
         asset = Asset(**f)
         asset.updated_by = request.user
         try:
@@ -669,7 +1098,7 @@ def bulk_import_confirm(request):
             # exactly the per-row round-trip we're trying to get rid of.
             # clean_fields()/clean() (format, max-length, choices, etc.)
             # still run normally per row.
-            asset.full_clean(exclude=["updated_by", "category"], validate_unique=False)
+            asset.full_clean(exclude=["updated_by", "category", "branch"], validate_unique=False)
         except Exception as exc:
             failed.append(f"{f.get('asset_tag', '?')}: {exc}")
             continue
@@ -751,17 +1180,23 @@ def search_assets(request):
     query = request.GET.get("q", "").strip()
     results = []
     matching_categories = []
+    accessible_branches = get_accessible_branches(request.user)
+    branch_scope_q = Q(branch__in=accessible_branches)
+    if is_super_admin(request.user):
+        branch_scope_q |= Q(branch__isnull=True)
     if query:
         matching_categories = list(
             AssetCategory.objects.filter(name__icontains=query)
-            .annotate(total=Count("assets", filter=Q(assets__is_active=True)))
+            .annotate(total=Count(
+                "assets", filter=Q(assets__is_active=True) & (Q(assets__branch__in=accessible_branches) | Q(assets__branch__isnull=True) if is_super_admin(request.user) else Q(assets__branch__in=accessible_branches))
+            ))
             .order_by("name")
         )
         for cat in matching_categories:
             cat.icon_class = CATEGORY_ICONS.get(cat.name, cat.icon or DEFAULT_CATEGORY_ICON)
 
         results = (
-            Asset.objects.filter(is_active=True)
+            Asset.objects.filter(is_active=True).filter(branch_scope_q)
             .filter(
                 Q(category__name__icontains=query)
                 | Q(asset_tag__icontains=query)
@@ -773,7 +1208,7 @@ def search_assets(request):
                 | Q(current_location__icontains=query)
                 | Q(notes__icontains=query)
             )
-            .select_related("category")
+            .select_related("category", "branch")
             .order_by("category__name", "asset_tag")[:100]
         )
     return render(request, "assets/search_results.html", {
@@ -790,9 +1225,13 @@ def search_suggestions(request):
     if not query:
         return JsonResponse({"categories": [], "assets": []})
 
+    accessible_branches = get_accessible_branches(request.user)
+
     categories = list(
         AssetCategory.objects.filter(name__icontains=query)
-        .annotate(total=Count("assets", filter=Q(assets__is_active=True)))
+        .annotate(total=Count(
+            "assets", filter=Q(assets__is_active=True) & Q(assets__branch__in=accessible_branches)
+        ))
         .order_by("name")[:5]
     )
     cat_data = [
@@ -806,7 +1245,7 @@ def search_suggestions(request):
     ]
 
     assets = (
-        Asset.objects.filter(is_active=True)
+        Asset.objects.filter(is_active=True, branch__in=accessible_branches)
         .filter(
             Q(asset_tag__icontains=query)
             | Q(name__icontains=query)
@@ -848,7 +1287,19 @@ def history_list(request):
     category_id = request.GET.get("category", "").strip()
     field = request.GET.get("field", "").strip()
 
-    entries = AssetHistory.objects.select_related("asset", "asset__category", "changed_by")
+    selected_branch, accessible_branches = resolve_selected_branch(request)
+    if selected_branch:
+        entries = AssetHistory.objects.filter(asset__branch=selected_branch)
+    else:
+        branch_q = Q(asset__branch__in=accessible_branches)
+        if is_super_admin(request.user):
+            branch_q |= Q(asset__branch__isnull=True)
+        entries = AssetHistory.objects.filter(branch_q)
+
+    entries = (
+        entries
+        .select_related("asset", "asset__category", "asset__branch", "changed_by")
+    )
     if query:
         entries = entries.filter(
             Q(asset__asset_tag__icontains=query) | Q(asset__name__icontains=query)

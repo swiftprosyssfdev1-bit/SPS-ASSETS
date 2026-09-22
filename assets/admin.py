@@ -1,5 +1,27 @@
 from django.contrib import admin
-from .models import AssetCategory, Asset, AssetHistory
+from .models import AssetCategory, Asset, AssetHistory, Branch, UserBranchAccess
+
+
+@admin.register(Branch)
+class BranchAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "status", "asset_count", "created_at")
+    list_editable = ("status",)
+    search_fields = ("name", "code")
+
+    def asset_count(self, obj):
+        return obj.assets.filter(is_active=True).count()
+    asset_count.short_description = "Active Assets"
+
+
+@admin.register(UserBranchAccess)
+class UserBranchAccessAdmin(admin.ModelAdmin):
+    list_display = ("user", "branch_list")
+    filter_horizontal = ("branches",)
+    search_fields = ("user__username", "user__email")
+
+    def branch_list(self, obj):
+        return ", ".join(b.name for b in obj.branches.all())
+    branch_list.short_description = "Branches"
 
 
 @admin.register(AssetCategory)
@@ -27,10 +49,10 @@ class AssetHistoryInline(admin.TabularInline):
 @admin.register(Asset)
 class AssetAdmin(admin.ModelAdmin):
     list_display = (
-        "asset_tag", "name", "category", "status",
+        "asset_tag", "name", "category", "branch", "status",
         "current_assigned_to", "current_location", "is_active", "updated_at",
     )
-    list_filter = ("category", "status", "is_active")
+    list_filter = ("branch", "category", "status", "is_active")
     search_fields = (
         "asset_tag", "name", "brand", "model_number", "serial_number",
         "current_assigned_to", "current_location", "linked_workstation",
@@ -39,7 +61,7 @@ class AssetAdmin(admin.ModelAdmin):
     inlines = [AssetHistoryInline]
     fieldsets = (
         ("Identification", {
-            "fields": ("category", "asset_tag", "name", "brand", "model_number", "serial_number")
+            "fields": ("category", "branch", "asset_tag", "name", "brand", "model_number", "serial_number")
         }),
         ("Current status", {
             "fields": ("status", "current_assigned_to", "current_location", "linked_workstation", "is_active")

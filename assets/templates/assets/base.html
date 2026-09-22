@@ -34,6 +34,11 @@
         .navbar-swift .user-chip { color: #b9c4d1; }
         .navbar-swift .btn-outline-danger { border-color: rgba(220,90,90,0.6); color: #ff9c9c; }
         .navbar-swift .btn-outline-danger:hover { background: rgba(220,90,90,0.15); color: #fff; }
+        .branch-switcher {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25);
+            color: #fff; min-width: 150px;
+        }
+        .branch-switcher option { color: #2c3542; }
 
         .btn-swift { background-color: var(--swift-blue); border-color: var(--swift-blue); color: #fff; font-weight: 500; }
         .btn-swift:hover { background-color: var(--swift-blue-dark); border-color: var(--swift-blue-dark); color: #fff; }
@@ -58,12 +63,21 @@
         }
         .stat-icon-wrap.orange { background: rgba(247,148,29,0.14); color: var(--swift-orange); }
 
-        .badge-status-working { background-color: #2e7d32; }
-        .badge-status-not_working { background-color: #c62828; }
-        .badge-status-idle { background-color: #9e9e9e; }
-        .badge-status-scrap { background-color: #424242; }
-        .badge-status-missing { background-color: #ad1457; }
-        .badge-status-service { background-color: var(--swift-orange); }
+        .badge-status-working { background-color: #2e7d32; color: #ffffff; }
+        .badge-status-active { background-color: #2e7d32; color: #ffffff; }
+        .badge-status-not_working { background-color: #c62828; color: #ffffff; }
+        .badge-status-idle { background-color: #9e9e9e; color: #ffffff; }
+        .badge-status-scrap { background-color: #424242; color: #ffffff; }
+        .badge-status-missing { background-color: #ad1457; color: #ffffff; }
+        .badge-status-service { background-color: var(--swift-orange); color: #ffffff; }
+        .badge-status-resigned { background-color: #c62828; color: #ffffff; }
+        .badge-status-inactive { background-color: #6c757d; color: #ffffff; }
+        .badge-status-other { background-color: #6c757d; color: #ffffff; }
+        .badge-status-resolved { background-color: #0d6efd; color: #ffffff; }
+        .badge-status-open { background-color: #fd7e14; color: #ffffff; }
+        .badge-status-running { background-color: #2e7d32; color: #ffffff; }
+        .badge-status-stopped { background-color: #c62828; color: #ffffff; }
+        .badge-status-completed { background-color: #0d6efd; color: #ffffff; }
 
         .category-icon-wrap {
             width: 42px; height: 42px; border-radius: 10px;
@@ -245,14 +259,42 @@
             <div class="search-suggestions-dropdown" id="searchSuggestionsDropdown"></div>
         </form>
         <div class="d-flex align-items-center gap-3">
-            {% if user.is_staff or user.is_superuser %}
+            {% if is_super_admin or accessible_branches|length > 1 %}
+            <form method="get" action="" class="branch-switcher-form d-none d-md-block">
+                <select name="branch" class="form-select form-select-sm branch-switcher"
+                        onchange="this.form.submit()" aria-label="Switch branch">
+                    {% if is_super_admin %}
+                    <option value="all" {% if not selected_branch %}selected{% endif %}>All Branches</option>
+                    {% endif %}
+                    {% for b in accessible_branches %}
+                    <option value="{{ b.id }}" {% if selected_branch.id == b.id %}selected{% endif %}>{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% elif accessible_branches|length == 1 %}
+            <span class="badge bg-light text-dark border small">
+                <i class="bi bi-geo-alt me-1"></i>{{ accessible_branches.0.name }}
+            </span>
+            {% endif %}
+            {% if user.is_superuser %}
             <a href="{% url 'assets:bulk_import' %}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-upload"></i> Import
             </a>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <i class="bi bi-diagram-3"></i> Manage
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="{% url 'assets:branch_list' %}"><i class="bi bi-geo-alt me-2"></i>Branches</a></li>
+                    <li><a class="dropdown-item" href="{% url 'assets:admin_list' %}"><i class="bi bi-people me-2"></i>Branch Admins</a></li>
+                </ul>
+            </div>
             {% endif %}
+            {% if user.is_superuser %}
             <a href="/admin/" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-gear"></i> Admin Panel
             </a>
+            {% endif %}
             <span class="user-chip small">Hi, {{ user.get_username }}</span>
             <form action="{% url 'assets:logout' %}" method="post" class="m-0">
                 {% csrf_token %}

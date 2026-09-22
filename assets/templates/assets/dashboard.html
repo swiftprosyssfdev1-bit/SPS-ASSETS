@@ -5,11 +5,19 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h3 class="page-title mb-1">Company Assets Dashboard</h3>
-        <div class="text-muted small">Live overview of every tracked asset across Swift ProSys.</div>
+        <div class="text-muted small">
+            {% if selected_branch %}
+                Showing <strong>{{ selected_branch.name }}</strong> branch.
+            {% elif is_super_admin %}
+                Showing <strong>all branches</strong>.
+            {% else %}
+                Live overview of your assigned branch(es).
+            {% endif %}
+        </div>
     </div>
     <div class="d-flex gap-2">
         <a href="{% url 'assets:export_assets' %}" class="btn btn-outline-secondary">
-            <i class="bi bi-file-earmark-excel"></i> Download All (Excel)
+            <i class="bi bi-file-earmark-excel"></i> Download {% if selected_branch %}Branch{% else %}All{% endif %} (Excel)
         </a>
         {% if allow_clear_all %}
         <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearAllModal">
@@ -35,7 +43,7 @@
                 <div class="modal-body">
                     <div class="alert alert-danger py-2 mb-3">
                         <i class="bi bi-exclamation-triangle-fill me-1"></i>
-                        <strong>Extreme Caution:</strong> This will permanently erase <strong>all active records</strong> and all audit history across every category.
+                        <strong>Extreme Caution:</strong> This will permanently erase <strong>all active records</strong> and all audit history across every branch and category.
                     </div>
 
                     <div class="mb-3">
@@ -57,33 +65,6 @@
     </div>
 </div>
 {% endif %}
-
-<div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <div class="card card-stat hoverable p-3 h-100">
-            <div class="d-flex align-items-center gap-3">
-                <div class="stat-icon-wrap"><i class="bi bi-boxes"></i></div>
-                <div>
-                    <div class="text-muted small">Total Active Assets</div>
-                    <div class="stat-number">{{ total_assets }}</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% for s in status_breakdown %}
-    <div class="col-md-3">
-        <div class="card card-stat hoverable p-3 h-100">
-            <div class="d-flex align-items-center gap-3">
-                <div class="stat-icon-wrap orange"><i class="bi bi-activity"></i></div>
-                <div>
-                    <div class="text-muted small text-capitalize">{{ s.status|cut:"_" }}</div>
-                    <div class="stat-number">{{ s.count }}</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="section-title mb-0">Asset Categories</h5>

@@ -1,0 +1,33 @@
+{% extends "assets/base.html" %}
+{% block title %}{{ title }} - Asset Register{% endblock %}
+{% block content %}
+
+<div class="mb-4 mx-auto" style="max-width: 520px;">
+    <a href="{% url 'assets:branch_list' %}" class="btn-back">
+        <i class="bi bi-arrow-left"></i> Back to Branches
+    </a>
+    <h3 class="fw-bold text-secondary mt-1">{{ title }}</h3>
+</div>
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 520px;">
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Branch Name</label>
+            {{ form.name }}
+            {{ form.name.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Code</label>
+            {{ form.code }}
+            {{ form.code.errors }}
+        </div>
+        <div class="form-check mb-3">
+            {{ form.status }}
+            <label class="form-check-label">{{ form.fields.status.label }}</label>
+        </div>
+        <button type="submit" class="btn btn-swift px-4">Save</button>
+    </form>
+</div>
+
+{% endblock %}

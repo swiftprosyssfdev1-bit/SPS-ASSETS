@@ -1,0 +1,451 @@
+### Asset Management System – Branch-Based Admin & UI Requirements
+
+Please modify the existing Asset Management System according to the following requirements.
+
+### 1. User Roles and Branch Administration
+
+There must be two levels of administration:
+
+#### Super Admin
+
+* There should be **one Super Admin**.
+* The Super Admin has access to the complete system.
+* The Super Admin can:
+
+  * Create and manage Branch Admin accounts.
+  * Assign one or more branches to each Branch Admin.
+  * Add new branches in the future.
+  * Remove a branch from a Branch Admin's access.
+  * View assets belonging to all branches.
+  * Import asset data.
+* The **Import button must be visible only to the Super Admin**.
+* Branch Admins must **not** have access to the Import function.
+
+#### Branch Admin
+
+* There can initially be **4 Branch Admins**, one for each branch:
+
+  * Chennai
+  * Tindivanam
+  * Kanchipuram
+  * Madurai
+* The system must not permanently restrict the number of branches or admins to four.
+* New branches can be added by the Super Admin in the future.
+* A Branch Admin can be assigned to one or multiple branches.
+* A Branch Admin can only view and manage assets belonging to the branches assigned to them.
+* If a Branch Admin has access to multiple branches, provide a **Branch dropdown** so they can switch between their authorized branches.
+* Branch Admins must never be able to access assets from branches that have not been assigned to them.
+
+---
+
+### 2. Branch-Based Asset Structure
+
+Every asset must belong to a branch.
+
+The initial branches are:
+
+```text
+Chennai
+Tindivanam
+Kanchipuram
+Madurai
+```
+
+The database and application must be designed so that additional branches can be created later without changing the code.
+
+For example:
+
+```text
+Branch
+ ├── Chennai
+ │    ├── Computer
+ │    ├── Monitor
+ │    ├── Keyboard
+ │    └── ...
+ │
+ ├── Tindivanam
+ ├── Kanchipuram
+ └── Madurai
+```
+
+The branch should be associated directly with every asset record.
+
+---
+
+### 3. Super Admin Dashboard
+
+The Super Admin dashboard should provide a complete view of the system.
+
+However, **do not display dashboard cards showing total numbers/counts of assets**.
+
+Remove cards such as:
+
+```text
+Total Assets
+Total Computers
+Total Monitors
+Total Users
+Total Categories
+```
+
+Instead, the dashboard should focus on useful asset/category information and management functions.
+
+The Super Admin should have access to:
+
+* Branch selection
+* Asset categories
+* Asset status information
+* Asset management
+* Branch management
+* Admin management
+* Import functionality
+
+The **Import button should appear on the Super Admin dashboard/pages only**.
+
+---
+
+### 4. Branch Selection
+
+For the Super Admin, provide a Branch dropdown that allows them to select:
+
+```text
+All Branches
+Chennai
+Tindivanam
+Kanchipuram
+Madurai
+```
+
+When a specific branch is selected, the asset lists, categories, and related information should be filtered accordingly.
+
+When the Super Admin selects **All Branches**, they should be able to view assets across all branches.
+
+For Branch Admins, the dropdown should show **only the branches assigned to that admin**.
+
+---
+
+### 5. Asset List Design
+
+Do not display every field of an asset record in the main list.
+
+The main asset listing should show only the important/common fields:
+
+| Field                    |
+| ------------------------ |
+| Tag                      |
+| Name                     |
+| Brand / Model            |
+| Serial No.               |
+| Status                   |
+| Current User / Location  |
+| Previous User / Location |
+| Actions                  |
+
+The system may contain many additional fields depending on the asset category, but **do not display all fields in the main table**.
+
+For example, a CPU/System Unit may have many fields such as:
+
+```text
+Processor
+RAM
+Hard Disk
+Operating System
+Motherboard
+Graphics Card
+Antivirus
+Last Service Date
+Warranty
+Notes
+...
+```
+
+These fields should not all appear in the main asset list.
+
+Instead:
+
+* Show only the important fields in the list.
+* Use the **View** page to display the complete asset information.
+* The View page can organize additional fields logically by sections.
+* The Edit page should allow the administrator to edit the fields relevant to that asset.
+
+---
+
+### 6. Category-Specific Fields
+
+Different asset categories have different fields.
+
+The UI should be **category-aware**.
+
+For example:
+
+#### Computer / System Unit
+
+Show relevant fields such as:
+
+* Tag
+* System Name
+* Processor
+* RAM
+* Hard Disk
+* Operating System
+* Status
+* Current User / Location
+
+#### Monitor
+
+Show relevant fields such as:
+
+* Tag
+* Brand / Model
+* Serial Number
+* Size
+* Status
+* Current User / Location
+
+#### Keyboard
+
+Show relevant fields such as:
+
+* Tag
+* Brand / Model
+* Serial Number
+* Status
+* Current User / Location
+
+The exact fields should depend on the category.
+
+**Do not force every category to display the same large set of fields.**
+
+---
+
+### 7. Actions
+
+Every asset listing should have an **Actions** column containing:
+
+```text
+View
+Edit
+Delete
+```
+
+The actions should be cleanly presented and consistently positioned throughout the application.
+
+#### View
+
+* Display the complete asset information.
+* Organize information into logical sections.
+* Show category-specific fields.
+
+#### Edit
+
+* Allow the administrator to edit the asset.
+* Show appropriate fields based on the asset category.
+
+#### Delete
+
+* Allow deletion only for users with the appropriate permission.
+* Show a confirmation before permanently deleting an asset.
+
+---
+
+### 8. Workstation Page – Combo Box / Autocomplete
+
+The current Workstation page requires administrators to manually enter values into input boxes.
+
+Replace these manual text-entry fields with **searchable combo boxes / autocomplete fields** wherever the value should come from an existing asset or record.
+
+For example, if a Workstation contains:
+
+```text
+Computer
+Monitor
+Keyboard
+Mouse
+Employee
+```
+
+the administrator should be able to:
+
+1. Click the input field.
+2. Start typing.
+3. See matching existing records.
+4. Select the required record from the dropdown.
+
+Example:
+
+```text
+Monitor:
+[ Type monitor tag / serial number... ▼ ]
+
+Typing:
+M057
+
+Results:
+M057 - Dell P2422H - SN12345
+M063 - Dell P2422H - SN45678
+```
+
+The same searchable selection behavior should be implemented for all applicable Workstation fields.
+
+### Important
+
+The administrator should **not need to remember and manually type asset IDs/tags**.
+
+The combo box should:
+
+* Support typing/searching.
+* Display matching records.
+* Allow selecting an existing asset.
+* Show useful identifying information such as Tag + Name + Serial Number.
+* Prevent invalid/non-existing asset references where applicable.
+
+---
+
+### 9. Branch-Aware Workstation Management
+
+Workstations must also respect branch permissions.
+
+When a Branch Admin is working with a Workstation:
+
+* Only assets from their authorized branch(es) should appear in the combo boxes.
+* If the Branch Admin has access to multiple branches, provide branch selection where required.
+* Do not allow a Branch Admin to assign an asset from an unauthorized branch.
+
+The Super Admin can access assets from all branches.
+
+---
+
+### 10. Future Scalability
+
+The implementation must not hard-code the four initial branches.
+
+Do **not** write logic such as:
+
+```python
+if branch == "Chennai":
+    ...
+elif branch == "Tindivanam":
+    ...
+elif branch == "Kanchipuram":
+    ...
+elif branch == "Madurai":
+    ...
+```
+
+Instead, create a proper **Branch model/table**.
+
+Example:
+
+```text
+Branch
+------
+id
+name
+code
+status
+created_at
+```
+
+Assets should have a relationship to Branch:
+
+```text
+Asset
+-----
+id
+branch_id
+category
+asset_tag
+...
+```
+
+Branch Admin access should also be relationship-based so one admin can have access to multiple branches.
+
+For example:
+
+```text
+Admin A
+ ├── Chennai
+ └── Madurai
+
+Admin B
+ └── Tindivanam
+
+Admin C
+ └── Kanchipuram
+
+Admin D
+ ├── Chennai
+ ├── Tindivanam
+ └── Kanchipuram
+```
+
+The Super Admin should be able to modify these assignments at any time.
+
+---
+
+### 11. Access Control
+
+Implement permission checks at the backend level, not only in the frontend.
+
+A Branch Admin must not be able to bypass branch restrictions by manually changing URLs, IDs, API requests, or form values.
+
+Every asset-related operation should verify:
+
+```text
+Current User
+      ↓
+Assigned Branches
+      ↓
+Asset Branch
+      ↓
+Allow / Deny
+```
+
+This must apply to:
+
+* View
+* Add
+* Edit
+* Delete
+* Workstation assignment
+* Search
+* Combo-box results
+* Reports
+* Any other asset-related operation
+
+---
+
+### 12. Final UI Principle
+
+The application should follow a clean, professional enterprise design.
+
+The main pages should be simple and easy to understand.
+
+**Do not overload tables with every available field.**
+
+Use:
+
+```text
+List Page
+    ↓
+Important fields only
+    ↓
+View / Edit / Delete
+    ↓
+View page contains complete details
+```
+
+The system should therefore provide:
+
+* Branch-based access control
+* Super Admin management
+* Multiple Branch Admins
+* Dynamic branch creation
+* Branch dropdown/filtering
+* Super Admin-only import
+* Category-specific asset fields
+* Clean asset tables
+* View/Edit/Delete actions
+* Searchable combo boxes/autocomplete on Workstation fields
+* Backend-enforced branch permissions
+* A scalable structure for adding future branches

@@ -11,7 +11,7 @@
 </div>
 
 <div class="card card-stat p-4 mx-auto" style="max-width: 720px;">
-    <form method="post">
+    <form method="post" id="asset-form">
         {% csrf_token %}
 
         <div class="row g-3">
@@ -21,92 +21,66 @@
                 {{ form.category.errors }}
             </div>
             <div class="col-md-6">
-                <label class="form-label fw-semibold">{% if employee_form %}Employee ID{% else %}Asset Tag{% endif %}</label>
+                <label class="form-label fw-semibold">Branch</label>
+                {{ form.branch }}
+                {{ form.branch.errors }}
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold" id="label-asset-tag">{% if employee_form %}Employee ID{% else %}Asset Tag{% endif %}</label>
                 {{ form.asset_tag }}
-                {% if not employee_form %}<div class="form-text">Unique ID, e.g. WS001, M009, K014, U006</div>{% endif %}
+                <div class="form-text" id="help-asset-tag">{% if not employee_form %}Unique ID, e.g. WS001, M009, K014, U006{% endif %}</div>
                 {{ form.asset_tag.errors }}
             </div>
-
             <div class="col-md-6">
-                <label class="form-label fw-semibold">{% if employee_form %}Employee Name{% else %}Name{% endif %}</label>
+                <label class="form-label fw-semibold" id="label-name">{% if employee_form %}Employee Name{% else %}Name{% endif %}</label>
                 {{ form.name }}
                 {{ form.name.errors }}
             </div>
-            <div class="col-md-6">
+
+            <div class="col-md-6" data-common-field="status">
                 <label class="form-label fw-semibold">Status</label>
                 {{ form.status }}
             </div>
-
-            {% if not is_info_register %}
-            <div class="col-md-4">
+            <div class="col-md-4" data-common-field="brand">
                 <label class="form-label fw-semibold">Brand</label>
                 {{ form.brand }}
             </div>
-            <div class="col-md-4">
+            <div class="col-md-4" data-common-field="model_number">
                 <label class="form-label fw-semibold">Model Number</label>
                 {{ form.model_number }}
             </div>
-            <div class="col-md-4">
+            <div class="col-md-4" data-common-field="serial_number">
                 <label class="form-label fw-semibold">Serial Number</label>
                 {{ form.serial_number }}
             </div>
-
-            <div class="col-md-6">
+            <div class="col-md-6" data-common-field="current_assigned_to">
                 <label class="form-label fw-semibold">Current Assigned To</label>
                 {{ form.current_assigned_to }}
                 <div class="form-text">Current user / employee / location</div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-6" data-common-field="current_location">
                 <label class="form-label fw-semibold">Current Location</label>
                 {{ form.current_location }}
             </div>
-
-            <div class="col-md-6">
+            <div class="col-md-6" data-common-field="linked_workstation">
                 <label class="form-label fw-semibold">Linked Workstation</label>
                 {{ form.linked_workstation }}
                 <div class="form-text">Workstation ID this item is used in, e.g. WS004 (optional)</div>
             </div>
-
-            {% endif %}
-
-            {% if category_fields and not employee_form %}
-            <div class="col-12">
-                <hr>
-                <h6 class="fw-bold text-secondary mb-0">{{ category.name }} Information</h6>
-            </div>
-            {% for field in category_fields %}
-            <div class="col-md-6">
-                <label class="form-label fw-semibold">{{ field.label }}</label>
-                {% if field.type == "select" %}
-                <select name="{{ field.name }}" class="form-select">
-                    <option value="">—</option>
-                    {% for opt in field.options %}
-                    <option value="{{ opt }}" {% if asset.extra_details|get_item:field.name == opt %}selected{% endif %}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-                {% elif field.type == "date" %}
-                <input type="date" name="{{ field.name }}" class="form-control" value="{{ asset.extra_details|get_item:field.name }}">
-                {% elif field.type == "number" %}
-                <input type="number" name="{{ field.name }}" class="form-control" value="{{ asset.extra_details|get_item:field.name }}">
-                {% else %}
-                <input type="text" name="{{ field.name }}" class="form-control" value="{{ asset.extra_details|get_item:field.name }}">
-                {% endif %}
-            </div>
-            {% endfor %}
-            <div class="col-12"><hr></div>
-            {% endif %}
-
-            {% if not is_info_register %}
-            <div class="col-md-3">
+            <div class="col-md-3" data-common-field="purchase_date">
                 <label class="form-label fw-semibold">Purchase Date</label>
                 {{ form.purchase_date }}
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3" data-common-field="last_service_date">
                 <label class="form-label fw-semibold">Last Service Date</label>
                 {{ form.last_service_date }}
             </div>
 
-            {% endif %}
+            <div class="col-12" id="category-extra-fields-wrap" style="display:none;">
+                <hr>
+                <h6 class="fw-bold text-secondary mb-3" id="category-extra-fields-title"></h6>
+                <div class="row g-3" id="category-extra-fields"></div>
+            </div>
 
             <div class="col-12">
                 <label class="form-label fw-semibold">Notes</label>
@@ -127,5 +101,151 @@
         </div>
     </form>
 </div>
+
+{{ category_form_config|json_script:"category-form-config" }}
+{{ asset_extra_details|json_script:"asset-extra-details" }}
+
+<style>
+    .asset-combo-dropdown {
+        position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+        background: #fff; border: 1px solid #dde3ec; border-radius: 10px;
+        box-shadow: 0 8px 20px -8px rgba(20,30,45,0.25); z-index: 20;
+        max-height: 260px; overflow-y: auto; display: none;
+    }
+    .asset-combo-item { padding: .5rem .8rem; font-size: .88rem; cursor: pointer; }
+    .asset-combo-item:hover, .asset-combo-item.active { background: rgba(41,171,226,0.12); }
+    .asset-combo-empty { padding: .5rem .8rem; font-size: .82rem; color: #8a94a3; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const CONFIG = JSON.parse(document.getElementById('category-form-config').textContent);
+    const EXISTING_EXTRA = JSON.parse(document.getElementById('asset-extra-details').textContent);
+    const lookupUrl = "{% url 'assets:asset_lookup' %}";
+
+    const categorySelect = document.getElementById('id_category');
+    const branchSelect = document.getElementById('id_branch');
+    const extraWrap = document.getElementById('category-extra-fields-wrap');
+    const extraTitle = document.getElementById('category-extra-fields-title');
+    const extraContainer = document.getElementById('category-extra-fields');
+    const labelAssetTag = document.getElementById('label-asset-tag');
+    const helpAssetTag = document.getElementById('help-asset-tag');
+    const labelName = document.getElementById('label-name');
+
+    function escapeAttr(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function fieldHtml(field, value) {
+        const esc = escapeAttr(value);
+        if (field.lookup_category) {
+            return (
+                '<div class="col-md-6"><label class="form-label fw-semibold">' + field.label + '</label>' +
+                '<div class="asset-combo position-relative" data-lookup-category="' + field.lookup_category + '">' +
+                '<input type="text" class="form-control asset-combo-input" autocomplete="off" placeholder="Type to search…" value="' + esc + '">' +
+                '<input type="hidden" name="' + field.name + '" class="asset-combo-value" value="' + esc + '">' +
+                '<div class="asset-combo-dropdown"></div></div></div>'
+            );
+        }
+        if (field.type === 'select') {
+            const val = value != null ? String(value) : '';
+            let opts = '<option value="">—</option>';
+            (field.options || []).forEach(function (opt) {
+                opts += '<option value="' + escapeAttr(opt) + '"' + (opt === val ? ' selected' : '') + '>' + escapeAttr(opt) + '</option>';
+            });
+            return '<div class="col-md-6"><label class="form-label fw-semibold">' + field.label + '</label>' +
+                   '<select name="' + field.name + '" class="form-select">' + opts + '</select></div>';
+        }
+        const inputType = field.type === 'date' ? 'date' : (field.type === 'number' ? 'number' : 'text');
+        return '<div class="col-md-6"><label class="form-label fw-semibold">' + field.label + '</label>' +
+               '<input type="' + inputType + '" name="' + field.name + '" class="form-control" value="' + esc + '"></div>';
+    }
+
+    function setupCombo(wrap) {
+        const category = wrap.dataset.lookupCategory;
+        const input = wrap.querySelector('.asset-combo-input');
+        const hidden = wrap.querySelector('.asset-combo-value');
+        const dropdown = wrap.querySelector('.asset-combo-dropdown');
+        let debounce = null;
+
+        function search(query) {
+            const branchId = branchSelect ? branchSelect.value : '';
+            const params = new URLSearchParams({ category: category, q: query, branch: branchId });
+            fetch(lookupUrl + '?' + params.toString())
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    const results = data.results || [];
+                    if (!results.length) {
+                        dropdown.innerHTML = '<div class="asset-combo-empty">No matching ' + category + ' found</div>';
+                    } else {
+                        dropdown.innerHTML = results.map(function (r) {
+                            return '<div class="asset-combo-item" data-tag="' + r.tag.replace(/"/g, '&quot;') + '">' +
+                                   r.label.replace(/</g, '&lt;') + '</div>';
+                        }).join('');
+                    }
+                    dropdown.style.display = 'block';
+                });
+        }
+
+        input.addEventListener('input', function () {
+            hidden.value = '';
+            clearTimeout(debounce);
+            const q = this.value;
+            debounce = setTimeout(function () { search(q); }, 180);
+        });
+        input.addEventListener('focus', function () { search(this.value); });
+        dropdown.addEventListener('click', function (e) {
+            const item = e.target.closest('.asset-combo-item');
+            if (!item) return;
+            input.value = item.textContent;
+            hidden.value = item.dataset.tag;
+            dropdown.style.display = 'none';
+        });
+        document.addEventListener('click', function (e) {
+            if (!wrap.contains(e.target)) dropdown.style.display = 'none';
+        });
+    }
+
+    function applyCategory(categoryId, preserveValues) {
+        const cfg = CONFIG[categoryId];
+
+        document.querySelectorAll('[data-common-field]').forEach(function (el) {
+            const show = !!cfg && cfg.common_fields.indexOf(el.dataset.commonField) !== -1;
+            el.style.display = show ? '' : 'none';
+        });
+
+        if (cfg) {
+            labelAssetTag.textContent = cfg.tag_label;
+            helpAssetTag.textContent = cfg.asset_tag_help;
+            labelName.textContent = cfg.name_label;
+        }
+
+        extraContainer.innerHTML = '';
+        if (cfg && cfg.extra_fields.length) {
+            extraWrap.style.display = '';
+            extraTitle.textContent = cfg.name + ' Information';
+            cfg.extra_fields.forEach(function (field) {
+                const value = preserveValues ? EXISTING_EXTRA[field.name] : '';
+                extraContainer.insertAdjacentHTML('beforeend', fieldHtml(field, value));
+            });
+            extraContainer.querySelectorAll('.asset-combo').forEach(setupCombo);
+        } else {
+            extraWrap.style.display = 'none';
+        }
+    }
+
+    if (categorySelect) {
+        // On first load, prefill extra-field values from the asset being
+        // edited (if any); any later change to the dropdown starts blank.
+        applyCategory(categorySelect.value, true);
+        categorySelect.addEventListener('change', function () {
+            applyCategory(this.value, false);
+        });
+    }
+});
+</script>
 
 {% endblock %}

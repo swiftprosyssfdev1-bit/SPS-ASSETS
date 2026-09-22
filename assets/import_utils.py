@@ -107,7 +107,7 @@ SHEET_HEADER_OVERRIDES = {
         "project name": "asset_tag",
     },
     "project backup": {
-        "hard disk name": "asset_tag",
+        "projects": "name",
     },
     "it vendor": {
         "vendor name": "name",
@@ -361,10 +361,6 @@ SHEET_TAG_COLUMN_HINTS = {
 # (there was no second item on that line) are simply skipped for that
 # block, not treated as an error.
 SHEET_BLOCK_SPLITS = {
-    "inside cupboard": [
-        [0, 1, 2, 3],  # Internal Hard disk / Hard Disk Size / Hard Disk S.No / Conditions
-        [6, 7, 8, 9],  # Internal HDD / Size / S.No / Conditions
-    ],
     "employee list": [
         [0, 1, 2],  # EmployeeName / Employee Id / Status (block 1)
         [3, 4, 5],  # Employee Name / Id / Status (block 2, no spacer column)
@@ -1087,8 +1083,28 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
 
         # In these legacy sheets, a row with just an S.No but no actual Project Name
         # or Hard disk Name is a blank spreadsheet row, not a valid record.
-        if not tag and category_display_name in ("Project Details", "Project Backup"):
+        if not tag and not raw_name_value and category_display_name in ("Project Details", "Project Backup"):
             continue
+
+        # Project Backup: generate independent PB-xxx tags so it never collides
+        # with or duplicates the physical Hard Disk's asset tag.
+        if category_display_name == "Project Backup":
+            if not tag or used_fallback_tag or not tag.upper().startswith("PB-"):
+                pb_num = 1
+                while f"pb-{pb_num:03d}" in existing_tags or f"pb-{pb_num:03d}" in seen_tags_in_file:
+                    pb_num += 1
+                tag = f"PB-{pb_num:03d}"
+                used_fallback_tag = True
+
+        # Incident Register: generate independent INC-xxx tags
+        if category_display_name == "Incident Register":
+            if not tag or used_fallback_tag or not tag.upper().startswith("INC-"):
+                inc_num = 1
+                while f"inc-{inc_num:03d}" in existing_tags or f"inc-{inc_num:03d}" in seen_tags_in_file:
+                    inc_num += 1
+                tag = f"INC-{inc_num:03d}"
+                used_fallback_tag = True
+                row_map["status"] = "resolved"
 
         # Employee_List-specific data-quality fix: some rows have the
         # employee's actual NAME typed into the Employee Id column, with
@@ -1099,7 +1115,6 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         # swap: use the value as the Name, generate a safe placeholder ID,
         # and record a warning for the admin to review. Never touches a row
         # where BOTH Name and Employee Id are already present.
-        raw_name_value = _cell_text(row_map.get("name"))
         if (
             employee_id_fallback and not raw_name_value and tag
             and not _looks_like_employee_id(tag)
@@ -1336,6 +1351,29 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                     extra_details[header_text] = value
 
         fields["extra_details"] = extra_details
+
+        # Validate relationship references (e.g. Project Backup referencing Hard Disk)
+        if category_display_name == "Project Backup" and extra_details:
+            hdd_ref = extra_details.get("Hard disk Name")
+            if hdd_ref:
+                from .relations import resolve_asset_reference
+                resolved_hdd = resolve_asset_reference(hdd_ref, "Hard Disk")
+                if not resolved_hdd and str(hdd_ref).strip().lower() not in seen_tags_in_file:
+                    if row_warnings is not None:
+                        row_warnings.append((
+                            current_sheet_name, i,
+                            f'Referenced Hard Disk "{hdd_ref}" was not found in Hard Disk records.'
+                        ))
+            mirror_ref = extra_details.get("Backup Available HDD")
+            if mirror_ref:
+                from .relations import resolve_asset_reference
+                resolved_mirror = resolve_asset_reference(mirror_ref, "Hard Disk")
+                if not resolved_mirror and str(mirror_ref).strip().lower() not in seen_tags_in_file:
+                    if row_warnings is not None:
+                        row_warnings.append((
+                            current_sheet_name, i,
+                            f'Referenced Backup Mirror HDD "{mirror_ref}" was not found in Hard Disk records.'
+                        ))
 
         # No real ID column on this sheet -> tag was generated, so the tag
         # check above can't tell a re-import from a new row. Compare content.
