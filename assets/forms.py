@@ -33,16 +33,29 @@ class AssetForm(forms.ModelForm):
         }
 
     def __init__(self, *args, accessible_branches=None, **kwargs):
-        """accessible_branches: queryset the current user is allowed to
-        assign. Passed in from the view — this form never decides
-        permissions on its own, it just restricts the dropdown to match
-        what the view has already authorized, and re-validates it in
-        clean_branch() so a tampered POST can't slip an unauthorized
-        branch id past this once the choices are narrowed."""
         super().__init__(*args, **kwargs)
         if accessible_branches is not None:
             self.fields["branch"].queryset = accessible_branches
         self.fields["branch"].required = True
+        self.fields["name"].required = False
+
+    def clean(self):
+        cleaned_data = super().clean()
+        name = cleaned_data.get("name")
+        category = cleaned_data.get("category")
+        brand = cleaned_data.get("brand")
+        model_number = cleaned_data.get("model_number")
+        asset_tag = cleaned_data.get("asset_tag")
+        if not name or not name.strip():
+            if brand:
+                cleaned_data["name"] = f"{brand} {model_number or ''}".strip() or brand
+            elif category and asset_tag:
+                cleaned_data["name"] = f"{category.name} {asset_tag}"
+            elif category:
+                cleaned_data["name"] = f"{category.name}"
+            else:
+                cleaned_data["name"] = "Asset"
+        return cleaned_data
 
     def clean_branch(self):
         branch = self.cleaned_data.get("branch")
@@ -106,8 +119,12 @@ class BranchAdminCreateForm(forms.Form):
 
 
 class BranchAdminEditForm(forms.Form):
-    """Super Admin: change an existing Branch Admin's branch assignments,
-    active status, and (optionally) reset their password."""
+    """Super Admin: change an existing Branch Admin's username, branch
+    assignments, active status, and (optionally) reset their password."""
+    username = forms.CharField(
+        max_length=150, label="Username",
+        widget=forms.TextInput(attrs={"class": "form-control", "autocomplete": "username"}),
+    )
     email = forms.EmailField(
         required=False, label="Email",
         widget=forms.EmailInput(attrs={"class": "form-control"}),
@@ -124,3 +141,16 @@ class BranchAdminEditForm(forms.Form):
         label="Branches this admin can manage",
     )
     is_active = forms.BooleanField(required=False, label="Account active")
+
+    def __init__(self, *args, admin_user=None, **kwargs):
+        self._admin_user = admin_user
+        super().__init__(*args, **kwargs)
+
+    def clean_username(self):
+        username = self.cleaned_data["username"].strip()
+        existing = User.objects.filter(username__iexact=username)
+        if self._admin_user is not None:
+            existing = existing.exclude(pk=self._admin_user.pk)
+        if existing.exists():
+            raise forms.ValidationError("A user with this username already exists.")
+        return username

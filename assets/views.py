@@ -395,26 +395,79 @@ def category_detail(request, category_id):
     })
 
 
-def _extract_extra_details(request, category_fields):
-    """Pull category-specific field values out of POST into a plain dict."""
-    extra = {}
-    for field in category_fields:
-        extra[field["name"]] = request.POST.get(field["name"], "").strip()
+def _extract_extra_details(request, category, existing_extra=None):
+    """Pull category-specific extra field values out of POST into a clean dict."""
+    config = _build_category_form_config().get(str(getattr(category, "pk", "")))
+    if not config:
+        return {}
+    extra_fields = config.get("extra_fields", [])
+    extra = dict(existing_extra or {}) if existing_extra else {}
+    for field in extra_fields:
+        name = field["name"]
+        if name in request.POST:
+            val = request.POST.get(name, "").strip()
+            if val != "":
+                extra[name] = val
+            elif name in extra:
+                extra.pop(name, None)
     return extra
 
 
 def _build_category_form_config():
     """Per-category config for the Add/Edit Asset form's JavaScript, so
     switching the Category dropdown updates which fields show instantly
-    with no page reload: which common fields apply, and that category's
+    with no page reload: which common fields apply, custom labels, and that category's
     own extra fields (with type/options/workstation-lookup info)."""
+    from .import_utils import SHEET_HEADER_OVERRIDES, HEADER_ALIASES, LABEL_TO_FIELD, _normalize_header
+    from .sheet_templates import CATEGORY_TO_TEMPLATE
+    from .category_fields import get_category_field_labels, get_common_fields, get_category_fields, workstation_lookup_category
+
     config = {}
     for cat in AssetCategory.objects.all():
-        cat_key = cat.name.strip().lower()
-        employee_form = cat_key in {"employee", "employee list"}
+        cat_norm = cat.name.strip().lower()
+        employee_form = cat_norm in {"employee", "employee list"}
+        lbl_cfg = get_category_field_labels(cat.name)
+        common_fields = get_common_fields(cat.name)
+        show_name = lbl_cfg.get("show_name", True)
+
+        template_key = CATEGORY_TO_TEMPLATE.get(cat_norm)
+        overrides = SHEET_HEADER_OVERRIDES.get(template_key, {})
+
         extra_fields = []
-        if not employee_form:
+        if cat_norm not in ("employee", "employee list", "project details", "other asset", "laptop", "networking equipment"):
             for f in get_category_fields(cat):
+                label = f["label"]
+                norm = _normalize_header(label)
+                mapped = overrides.get(norm) if overrides else None
+                if mapped is None:
+                    mapped = LABEL_TO_FIELD.get(norm) or HEADER_ALIASES.get(norm)
+
+                # Exclude if handled by core or common model fields:
+                if mapped in ("asset_tag", "name", "notes", "is_active", "category", "branch"):
+                    continue
+                if norm in ("asset tag", "name", "notes", "active", "is active", "category", "branch"):
+                    continue
+                if mapped in common_fields:
+                    continue
+                if norm in ("status", "current status") and "status" in common_fields:
+                    continue
+                if norm in ("brand",) and "brand" in common_fields:
+                    continue
+                if norm in ("model", "model no", "model number") and "model_number" in common_fields:
+                    continue
+                if norm in ("serial no", "serial no.", "serial number", "s.no", "sno") and "serial_number" in common_fields:
+                    continue
+                if norm in ("location", "current location") and "current_location" in common_fields:
+                    continue
+                if norm in ("user name", "employee name") and "current_assigned_to" in common_fields:
+                    continue
+                if norm in ("s.no", "sno"):
+                    continue
+                if cat_norm in ("inside cupboard", "inside the cupboard") and norm in ("item / description", "asset tag", "status", "location / storage notes"):
+                    continue
+                if cat_norm == "hard disk" and norm in ("hard disk name", "hard disk  number", "hard disk number"):
+                    continue
+
                 entry = {"name": f["name"], "label": f["label"], "type": f["type"]}
                 if f.get("options"):
                     entry["options"] = f["options"]
@@ -422,14 +475,20 @@ def _build_category_form_config():
                 if lookup:
                     entry["lookup_category"] = lookup
                 extra_fields.append(entry)
+
         config[str(cat.pk)] = {
             "name": cat.name,
-            "common_fields": get_common_fields(cat.name),
+            "common_fields": common_fields,
             "extra_fields": extra_fields,
             "employee_form": employee_form,
-            "tag_label": "Employee ID" if employee_form else "Asset Tag",
-            "name_label": "Employee Name" if employee_form else "Name",
-            "asset_tag_help": "" if employee_form else "Unique ID, e.g. WS001, M009, K014, U006",
+            "show_name": show_name,
+            "tag_label": lbl_cfg.get("tag_label", "Asset Tag"),
+            "name_label": lbl_cfg.get("name_label", "Name"),
+            "serial_label": lbl_cfg.get("serial_label", "Serial Number"),
+            "location_label": lbl_cfg.get("location_label", "Current Location"),
+            "assigned_label": lbl_cfg.get("assigned_label", "Current Assigned To"),
+            "model_label": lbl_cfg.get("model_label", "Model Number"),
+            "asset_tag_help": "" if employee_form else "Unique ID",
         }
     return config
 
@@ -467,7 +526,12 @@ def asset_create(request):
         if form.is_valid():
             asset = form.save(commit=False)
             asset.updated_by = request.user
-            asset.extra_details = _extract_extra_details(request, get_category_fields(asset.category))
+            if not asset.name or not asset.name.strip():
+                if asset.brand:
+                    asset.name = f"{asset.brand} {asset.model_number}".strip() or asset.brand
+                else:
+                    asset.name = f"{asset.category.name} {asset.asset_tag}"
+            asset.extra_details = _extract_extra_details(request, asset.category)
             if employee_form:
                 asset.extra_details = _sync_employee_extra_details(asset, asset.extra_details)
             asset.save()
@@ -514,13 +578,15 @@ def asset_update(request, asset_id):
             _project_form_setup(form, instance=Asset.objects.get(pk=asset.pk))
         if form.is_valid():
             updated = form.save(commit=False)
-            # Re-check: the branch the form resolved to must still be one
-            # this user may touch (belt-and-braces on top of the form's own
-            # queryset restriction, in case instance.branch was swapped).
             require_branch_access(request.user, updated.branch)
             updated.updated_by = request.user
+            if not updated.name or not updated.name.strip():
+                if updated.brand:
+                    updated.name = f"{updated.brand} {updated.model_number}".strip() or updated.brand
+                else:
+                    updated.name = f"{updated.category.name} {updated.asset_tag}"
             category_fields = get_category_fields(updated.category)
-            updated.extra_details = _extract_extra_details(request, category_fields)
+            updated.extra_details = _extract_extra_details(request, updated.category, existing_extra=asset.extra_details)
             if employee_form:
                 # keep values of the (hidden) sheet columns that the form doesn't post
                 merged = dict(Asset.objects.get(pk=asset.pk).extra_details or {})
@@ -657,7 +723,7 @@ def branch_list(request):
     branches = Branch.objects.annotate(
         asset_count=Count("assets", filter=Q(assets__is_active=True)),
         admin_count=Count("admins", distinct=True),
-    ).order_by("name")
+    ).order_by("code", "name")
     return render(request, "assets/branch_list.html", {"branches": branches})
 
 
@@ -737,8 +803,9 @@ def admin_update(request, user_id):
     profile, _created = UserBranchAccess.objects.get_or_create(user=admin_user)
 
     if request.method == "POST":
-        form = BranchAdminEditForm(request.POST)
+        form = BranchAdminEditForm(request.POST, admin_user=admin_user)
         if form.is_valid():
+            admin_user.username = form.cleaned_data["username"]
             admin_user.email = form.cleaned_data["email"]
             admin_user.is_active = form.cleaned_data["is_active"]
             if form.cleaned_data["new_password"]:
@@ -748,7 +815,8 @@ def admin_update(request, user_id):
             messages.success(request, f"Branch Admin '{admin_user.username}' updated.")
             return redirect("assets:admin_list")
     else:
-        form = BranchAdminEditForm(initial={
+        form = BranchAdminEditForm(admin_user=admin_user, initial={
+            "username": admin_user.username,
             "email": admin_user.email,
             "is_active": admin_user.is_active,
             "branches": profile.branches.all(),
@@ -825,7 +893,28 @@ def export_assets(request):
             headers = [c["header"] if c["header"] is not None else "" for c in template]
             data_rows = []
             for asset in assets:
-                row = [asset.extra_details.get(c["key"], "") for c in template]
+                row = []
+                for c in template:
+                    key = c["key"]
+                    header = c["header"] or ""
+                    val = (asset.extra_details or {}).get(key)
+                    if val is None or str(val).strip() == "":
+                        norm = _normalize_header(header)
+                        if norm in ("asset tag", "asset id", "tag", "id", "hard disk number", "keyboard id", "monitor no", "mouse", "ups no", "bluetooth no", "system no", "employee id"):
+                            val = asset.asset_tag
+                        elif norm in ("item description", "item / description", "name", "asset name", "hard disk name", "system name", "vendor name", "device name", "devices", "projects", "project name", "employeename", "employee name", "description model", "description / model"):
+                            val = asset.name
+                        elif norm in ("serial no", "serial no.", "serial number", "s.no", "s no", "product key"):
+                            val = asset.serial_number
+                        elif norm == "status":
+                            val = asset.get_status_display()
+                        elif norm in ("location storage notes", "location / storage notes", "storage location", "location", "notes"):
+                            val = asset.notes or asset.current_location
+                        elif norm in ("item type", "type"):
+                            val = (asset.extra_details or {}).get("Item Type") or (asset.extra_details or {}).get("item_type") or asset.category.name
+                        elif norm in ("capacity specs", "capacity / specs", "size", "capacity"):
+                            val = (asset.extra_details or {}).get("Size") or (asset.extra_details or {}).get("Capacity") or (asset.extra_details or {}).get("capacity_size")
+                    row.append(val if val is not None else "")
                 data_rows.append(row)
             # Trim only genuinely blank-header columns that have no data at
             # all across every row — keep every named column regardless.

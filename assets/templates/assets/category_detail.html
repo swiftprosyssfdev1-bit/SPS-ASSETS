@@ -25,8 +25,10 @@
             <thead class="table-light">
                 <tr>
                     {% if is_cupboard %}
-                    <th style="min-width: 240px;">Item / Description</th>
                     <th>Asset Tag</th>
+                    <th>Item Type</th>
+                    <th style="min-width: 200px;">Description / Model</th>
+                    <th>Capacity / Specs</th>
                     <th>Serial No.</th>
                     <th>Status</th>
                     <th>Location / Storage Notes</th>
@@ -48,6 +50,15 @@
                     <th>Start Date & Time</th>
                     <th>End Date & Time</th>
                     <th>Status</th>
+                    {% elif is_hard_disk %}
+                    <th>Hard Disk Number</th>
+                    <th>Hard Disk Name</th>
+                    <th>Size</th>
+                    <th>Serial No</th>
+                    <th>Conditions</th>
+                    <th>Purpose</th>
+                    <th>Status</th>
+                    <th>Current Status</th>
                     {% elif is_project_details %}
                     <th>Project Name</th>
                     <th>Status</th>
@@ -73,14 +84,28 @@
                 {% for a in assets %}
                 <tr>
                     {% if is_cupboard %}
+                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
+                    <td>
+                        {% with item_type=a.extra_details|get_item:"Item Type" %}
+                            {% if item_type == "Hard Disk" %}
+                                <span class="badge bg-primary-subtle text-primary border"><i class="bi bi-hdd me-1"></i>Hard Disk</span>
+                            {% elif item_type == "RAM / Memory" or item_type == "RAM" %}
+                                <span class="badge bg-success-subtle text-success border"><i class="bi bi-memory me-1"></i>RAM</span>
+                            {% else %}
+                                <span class="badge bg-secondary-subtle text-secondary border"><i class="bi bi-box-seam me-1"></i>{{ item_type|default:"Item" }}</span>
+                            {% endif %}
+                        {% endwith %}
+                    </td>
                     <td class="fw-semibold">
-                        <i class="bi bi-box-seam me-2 text-primary"></i>{{ a.name }}
-                        {% if a.brand and a.brand != 'Cupboard Storage' and a.brand != 'Accessory' %}
-                        <span class="badge bg-light text-muted border ms-1 font-monospace">{{ a.brand }}</span>
+                        {{ a.name }}
+                        {% if a.brand and a.brand != 'Cupboard Storage' and a.brand != 'Accessory' and a.brand != 'Generic / OEM' %}
+                        <span class="badge bg-light text-muted border ms-1">{{ a.brand }}</span>
                         {% endif %}
                     </td>
                     <td>
-                        <span class="badge bg-light text-dark border font-monospace">{{ a.asset_tag }}</span>
+                        {% with size_val=a.extra_details|get_item:"Size" cap_val=a.extra_details|get_item:"Capacity" %}
+                            {{ size_val|default:cap_val|default:"—" }}
+                        {% endwith %}
                     </td>
                     <td>
                         {% if a.serial_number %}
@@ -154,21 +179,58 @@
                     </td>
                     {% endif %}
                     {% elif is_hard_disk %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    <td>{{ a.extra_details|get_item:"Hard Disk Name"|default:a.name }}</td>
-                    <td>{{ a.brand }} {{ a.model_number }}</td>
-                    <td>{{ a.serial_number|default:"—" }}</td>
-                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
-                    <td>{{ a.current_assigned_to|default:"—" }} {% if a.current_location %}/ {{ a.current_location }}{% endif %}</td>
-                    <td class="text-muted">{{ a.previous_assigned_to|default:"—" }} {% if a.previous_location %}/ {{ a.previous_location }}{% endif %}</td>
+                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
+                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td>{{ a.extra_details|get_item:"Size"|default:"—" }}</td>
+                    <td>
+                        {% if a.serial_number %}
+                        <code class="text-dark">{{ a.serial_number }}</code>
+                        {% else %}
+                        <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted" style="max-width: 220px;">{{ a.extra_details|get_item:"Conditions"|default:"—" }}</td>
+                    <td class="small text-muted" style="max-width: 220px;">{{ a.extra_details|get_item:"Purpose"|default:"—" }}</td>
+                    <td>
+                        {% if a.status == 'not_set' %}
+                        <span class="badge badge-status-not_set">Not Set</span>
+                        {% else %}
+                        <span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted" style="max-width: 240px;">
+                        {% with cs=a.extra_details|get_item:"Current Status" det=a.extra_details|get_item:"Details" %}
+                            {{ cs|default:det|default:"—" }}
+                        {% endwith %}
+                    </td>
                     {% else %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
                     {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
                     <td>{{ a.brand }} {{ a.model_number }}</td>
                     <td>{{ a.serial_number|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
-                    <td>{{ a.current_assigned_to|default:"—" }} {% if a.current_location %}/ {{ a.current_location }}{% endif %}</td>
-                    <td class="text-muted">{{ a.previous_assigned_to|default:"—" }} {% if a.previous_location %}/ {{ a.previous_location }}{% endif %}</td>
+                    <td>
+                        {% if a.current_assigned_to and a.current_location %}
+                            {{ a.current_assigned_to }} <span class="text-muted small">({{ a.current_location }})</span>
+                        {% elif a.current_assigned_to %}
+                            {{ a.current_assigned_to }}
+                        {% elif a.current_location %}
+                            <span class="text-secondary"><i class="bi bi-geo-alt me-1"></i>{{ a.current_location }}</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-muted">
+                        {% if a.previous_assigned_to and a.previous_location %}
+                            {{ a.previous_assigned_to }} <span class="small">({{ a.previous_location }})</span>
+                        {% elif a.previous_assigned_to %}
+                            {{ a.previous_assigned_to }}
+                        {% elif a.previous_location %}
+                            {{ a.previous_location }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
                     {% endif %}
                     {% if show_branch_column %}
                     <td>

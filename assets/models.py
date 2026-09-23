@@ -19,7 +19,7 @@ class Branch(models.Model):
 
     class Meta:
         verbose_name_plural = "Branches"
-        ordering = ["name"]
+        ordering = ["code", "name"]
 
     def __str__(self):
         return self.name
@@ -97,6 +97,7 @@ class Asset(models.Model):
         ("running", "Running"),      # Project Details sheet's Status column
         ("stopped", "Stopped"),      # Project Details sheet's Status column
         ("completed", "Completed"),  # Project Details sheet's Status column
+        ("not_set", "Not Set"),
         ("other", "Other"),
     ]
 

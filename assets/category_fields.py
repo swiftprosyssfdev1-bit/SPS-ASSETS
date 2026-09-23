@@ -19,85 +19,7 @@ you add an entry here.
 import re
 
 CATEGORY_FIELDS = {
-    "keyboard": [
-        {"name": "keyboard_type", "label": "Keyboard Type", "type": "select",
-         "options": ["Mechanical", "Membrane", "Wireless"]},
-        {"name": "connection_type", "label": "Connection Type", "type": "select",
-         "options": ["USB", "Bluetooth", "Wireless"]},
-        {"name": "layout", "label": "Layout", "type": "text"},
-    ],
-    "mouse": [
-        {"name": "mouse_type", "label": "Mouse Type", "type": "select",
-         "options": ["Wired", "Wireless", "Bluetooth"]},
-        {"name": "connection_type", "label": "Connection Type", "type": "select",
-         "options": ["USB", "Bluetooth", "Wireless"]},
-        {"name": "dpi", "label": "DPI", "type": "number"},
-        {"name": "buttons", "label": "Buttons", "type": "number"},
-    ],
-    "monitor": [
-        {"name": "screen_size", "label": "Screen Size", "type": "text"},
-        {"name": "resolution", "label": "Resolution", "type": "text"},
-        {"name": "refresh_rate", "label": "Refresh Rate", "type": "text"},
-        {"name": "panel_type", "label": "Panel Type", "type": "select",
-         "options": ["IPS", "TN", "VA", "OLED"]},
-        {"name": "connection_type", "label": "Connection Type", "type": "text"},
-    ],
-    "hard disk": [
-        {"name": "storage_capacity", "label": "Storage Capacity", "type": "text"},
-        {"name": "disk_type", "label": "Disk Type", "type": "select",
-         "options": ["HDD", "SSD", "NVMe"]},
-        {"name": "interface", "label": "Interface", "type": "select",
-         "options": ["SATA", "USB", "NVMe"]},
-        {"name": "health_status", "label": "Health Status", "type": "text"},
-        {"name": "rpm", "label": "RPM", "type": "text"},
-    ],
-    "laptop": [
-        {"name": "processor", "label": "Processor", "type": "text"},
-        {"name": "ram", "label": "RAM", "type": "text"},
-        {"name": "storage", "label": "Storage", "type": "text"},
-        {"name": "operating_system", "label": "Operating System", "type": "text"},
-        {"name": "battery_health", "label": "Battery Health", "type": "text"},
-    ],
-    "workstation": [
-        {"name": "processor", "label": "Processor", "type": "text"},
-        {"name": "ram", "label": "RAM", "type": "text"},
-        {"name": "storage", "label": "Storage", "type": "text"},
-        {"name": "operating_system", "label": "Operating System", "type": "text"},
-        {"name": "workstation_location", "label": "Workstation Location", "type": "text"},
-    ],
-    "cpu / system unit": [
-        {"name": "processor", "label": "Processor", "type": "text"},
-        {"name": "ram", "label": "RAM", "type": "text"},
-        {"name": "storage", "label": "Storage", "type": "text"},
-        {"name": "operating_system", "label": "Operating System", "type": "text"},
-    ],
-    "air conditioner": [
-        {"name": "ac_type", "label": "AC Type", "type": "select",
-         "options": ["Split", "Window", "Cassette"]},
-        {"name": "capacity_tonnage", "label": "Capacity (Tonnage)", "type": "text"},
-        {"name": "installation_location", "label": "Installation Location", "type": "text"},
-    ],
-    "ups": [
-        {"name": "va_rating", "label": "VA Rating", "type": "text"},
-        {"name": "battery_type", "label": "Battery Type", "type": "text"},
-        {"name": "backup_time", "label": "Backup Time", "type": "text"},
-        {"name": "battery_replacement_date", "label": "Battery Replacement Date", "type": "date"},
-    ],
-    "software / os license": [
-        {"name": "license_type", "label": "License Type", "type": "select",
-         "options": ["Perpetual", "Subscription", "OEM"]},
-        {"name": "expiry_date", "label": "Expiry Date", "type": "date"},
-        {"name": "number_of_users", "label": "Number of Users", "type": "number"},
-    ],
-    "it vendor": [
-        {"name": "Mobile No", "label": "Mobile No", "type": "text"},
-        {"name": "Types of Service", "label": "Types of Service", "type": "text"},
-        {"name": "Details 1", "label": "Details 1", "type": "text"},
-        {"name": "Details 2", "label": "Details 2", "type": "text"},
-    ],
-    # Inside Cupboard uses a flexible 4-column layout (no rigid template).
-    # These fields appear in the Add/Edit form; the detail table uses the
-    # special is_cupboard branch in category_detail.html instead.
+    # Inside Cupboard uses a flexible 3-field layout for Add/Edit form.
     "inside cupboard": [
         {"name": "item_type", "label": "Item Type", "type": "select",
          "options": ["HDD", "RAM", "Accessory / Box", "Cable", "Peripheral", "Other"]},
@@ -169,11 +91,17 @@ def workstation_lookup_category(field_label):
 #
 # Category, Branch, Asset Tag, Name, Notes and Active are universal — every
 # asset needs them, so they always show. Everything below is hardware/
-# tracking detail that only some categories actually use; this map says
-# exactly which of those to show for each category. A category not listed
-# here falls back to DEFAULT_COMMON_FIELDS (the full physical-asset set),
-# so a brand-new category still gets a sensible form until it's tailored
-# here. Edit this dict to change what a given category's form shows.
+# tracking detail (Status, Brand, Model Number, Serial Number, Current
+# Assigned To, Current Location, Linked Workstation, Purchase Date, Last
+# Service Date) that a category only sees when it has NOTHING of its own
+# configured — the moment a category has its own field set (sheet
+# template / curated CATEGORY_FIELDS / discovered from data — see
+# get_category_fields), that set already covers everything the admin
+# needs to fill in, so none of these generic fields show on top of it.
+# No exceptions/overrides: every category follows the same rule, whether
+# it's Keyboard's "Keyboard Id, Brand, Status, S.No, Location" or
+# Workstation's own "Workstation ID, Employee ID, ... User Id" block —
+# only that category's own fields plus Notes/Active are shown.
 # ---------------------------------------------------------------------------
 
 DEFAULT_COMMON_FIELDS = [
@@ -182,28 +110,103 @@ DEFAULT_COMMON_FIELDS = [
     "purchase_date", "last_service_date",
 ]
 
-COMMON_FIELDS_BY_CATEGORY = {
-    # Plain information registers — no physical hardware to track.
-    "employee": ["status"],
-    "employee list": ["status"],
-    "it vendor": ["status"],
-    "incident register": ["status"],
-    "project details": ["status"],
-    "project backup": ["status"],
-    # These have their own detail fields (processor/RAM, license type, etc.)
-    # via CATEGORY_FIELDS/sheet templates, so they only need Status plus
-    # who/where it's assigned — not Brand/Model/Serial/Purchase/Service.
-    "workstation": ["status", "current_assigned_to", "current_location"],
-    "cpu / system unit": ["status", "current_assigned_to", "current_location"],
-    "software / os license": ["status", "current_assigned_to"],
+
+CATEGORY_LABELS = {
+    "employee": {
+        "tag_label": "Employee Id",
+        "name_label": "Employee Name",
+        "show_name": True,
+    },
+    "employee list": {
+        "tag_label": "Employee Id",
+        "name_label": "Employee Name",
+        "show_name": True,
+    },
+    "keyboard": {
+        "tag_label": "Keyboard Id",
+        "name_label": "Brand",
+        "serial_label": "S.No",
+        "location_label": "Location",
+    },
+    "mouse": {
+        "tag_label": "Mouse",
+        "name_label": "Brand",
+        "serial_label": "S.No",
+        "location_label": "Location",
+    },
+    "monitor": {
+        "tag_label": "Monitor No",
+        "name_label": "Brand",
+        "model_label": "Model",
+        "serial_label": "Serial No",
+    },
+    "cpu / system unit": {
+        "tag_label": "System No",
+        "name_label": "System Name",
+    },
+    "cpu - system unit": {
+        "tag_label": "System No",
+        "name_label": "System Name",
+    },
+    "hard disk": {
+        "tag_label": "Hard disk  Number",
+        "name_label": "Hard Disk Name",
+        "serial_label": "Serial No",
+    },
+    "ups": {
+        "tag_label": "UPS No",
+        "name_label": "Brand",
+        "model_label": "Model No",
+    },
+    "bluetooth device": {
+        "tag_label": "Bluetooth No",
+        "name_label": "Devices",
+        "assigned_label": "User Name",
+    },
+    "workstation": {
+        "tag_label": "Workstation ID",
+        "name_label": "Purposes",
+        "assigned_label": "Employee Name",
+    },
+    "it vendor": {
+        "tag_label": "S.No",
+        "name_label": "Vendor Name",
+    },
+    "incident register": {
+        "tag_label": "S.No",
+        "name_label": "Incident Type",
+    },
+    "project details": {
+        "tag_label": "S.No",
+        "name_label": "Project Name",
+    },
+    "project backup": {
+        "tag_label": "Hard disk Name",
+        "name_label": "Projects",
+        "assigned_label": "Project Manager",
+    },
 }
 
 
-def get_common_fields(category_name):
+def get_category_field_labels(category):
+    cat_name = category.name if hasattr(category, "name") else str(category or "")
+    norm = cat_name.strip().lower()
+    return CATEGORY_LABELS.get(norm, {})
+
+
+def get_common_fields(category):
     """Which of the toggleable common Asset fields to show on the
-    Add/Edit form for this category name."""
-    key = str(category_name or "").strip().lower()
-    return COMMON_FIELDS_BY_CATEGORY.get(key, DEFAULT_COMMON_FIELDS)
+    Add/Edit form for this category. A category with its own field set
+    (see get_category_fields) gets none of these — its own fields are
+    the whole form. Only a category with nothing of its own configured
+    falls back to the full generic set, so its Add Asset form isn't
+    empty.
+    """
+    if category is None:
+        return DEFAULT_COMMON_FIELDS
+    if get_category_fields(category):
+        return []
+    return DEFAULT_COMMON_FIELDS
 
 
 def employee_repeat_keys_in_use(category):
@@ -221,7 +224,7 @@ def employee_repeat_keys_in_use(category):
 
 
 def get_category_fields(category):
-    """category: AssetCategory instance or None. Returns list of field dicts.
+    """category: AssetCategory instance or category name string or None. Returns list of field dicts.
 
     Priority order:
       1. This category's own sheet template (sheet_templates.py), if one is
@@ -241,41 +244,33 @@ def get_category_fields(category):
     if not category:
         return []
 
+    cat_name = category.name if hasattr(category, "name") else str(category or "")
     from .sheet_templates import get_template_for_category
-    template = get_template_for_category(category.name)
+    template = get_template_for_category(cat_name)
     if template:
-        is_employee = is_employee_category(category.name)
-        used_employee_keys = employee_repeat_keys_in_use(category) if is_employee else set()
+        is_employee = is_employee_category(cat_name)
+        used_employee_keys = employee_repeat_keys_in_use(category) if (is_employee and hasattr(category, "pk")) else set()
         fields = []
         for col in template:
             if col["header"] is None:
-                # Blank-header column from the original sheet: keep its
-                # position/data (internal key), but there's no real field
-                # name to show as a form label — skip it in the human-
-                # facing Add/Edit form rather than inventing "Column D".
                 continue
             if _is_sensitive_field(col["header"]):
                 continue
             if is_employee and col["col_index"] >= EMPLOYEE_MAIN_COLUMNS:
-                # Repeat block (Employee Name / Id / Status again) — only
-                # shown if some employee really has data stored under it.
                 if col["key"] not in used_employee_keys:
                     continue
             fields.append({"name": col["key"], "label": col["header"], "type": "text"})
         if fields:
             return fields
 
-    # If this category is explicitly listed in CATEGORY_FIELDS, use that
-    # definition (skipping raw extra_details discovery). This lets us give
-    # Inside Cupboard — and similar categories — a curated, clean form
-    # instead of surfacing whatever raw Excel column names were imported.
-    curated = CATEGORY_FIELDS.get(category.name.strip().lower(), [])
+    curated = CATEGORY_FIELDS.get(cat_name.strip().lower(), [])
     if curated:
         return [f for f in curated if not _is_sensitive_field(f["name"])]
 
-    discovered = _discover_fields_from_data(category)
-    if discovered:
-        return discovered
+    if hasattr(category, "pk"):
+        discovered = _discover_fields_from_data(category)
+        if discovered:
+            return discovered
     return []
 
 

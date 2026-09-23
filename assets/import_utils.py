@@ -92,7 +92,11 @@ SHEET_HEADER_OVERRIDES = {
     "mouse": {"mouse": "asset_tag"},
     "ups": {"ups no": "asset_tag"},
     "bluetooth": {"bluetooth no": "asset_tag"},
-    "hard disk": {"hard disk number": "asset_tag"},  # "Hard disk  Number" (double space)
+    "hard disk": {
+        "hard disk number": "asset_tag",
+        "hard disk name": "name",
+        "conditions": None,  # avoid claiming 'status' since 'Status' column is present
+    },
     "employee list": {
         "employee id": "asset_tag",
         "employeename": "name",   # block 1: "EmployeeName" (no space)
@@ -108,6 +112,24 @@ SHEET_HEADER_OVERRIDES = {
     },
     "project backup": {
         "projects": "name",
+    },
+    "inside cupboard": {
+        "conditions": None,  # prevent alias to status; "Status" column handles status
+    },
+    "inside the cupboard": {
+        "conditions": None,
+    },
+    "biometric device": {
+        "id": None,           # prevent collision with 'Asset Tag'
+        "device name": None,  # prevent collision with 'Name'
+    },
+    "other asset": {
+        "id": None,           # prevent collision with 'Asset Tag'
+        "device name": None,  # prevent collision with 'Name'
+        "location": None,     # prevent collision with 'Current Location'
+    },
+    "bluetooth device": {
+        "bluetooth no": "asset_tag",
     },
     "it vendor": {
         "vendor name": "name",
@@ -293,9 +315,22 @@ SHEET_NAME_ALIASES = {
     "others": "Other Asset",
     "project details": "Project Details",
     "project backup": "Project Backup",
-    "inside the cupboard": "Inside Cupboard",
     "it_vendor list": "IT Vendor",
     "incident register": "Incident Register",
+    # "Inside Cupboard" / "Inside the Cupboard" are NOT aliased to an
+    # "Inside Cupboard" category — see FORCE_OTHER_ASSET_SHEETS below,
+    # which always routes those tabs to "Other Asset" instead.
+}
+
+# Sheet tab names (normalized) that should ALWAYS be filed under the
+# "Other Asset" catch-all category, even if an AssetCategory happens to
+# exist with a matching name. Unlike the generic fallback further down
+# (which only kicks in when nothing matches), this is a deliberate
+# routing choice: these tabs don't represent their own real asset
+# category, they're miscellaneous items that belong in Other Asset.
+FORCE_OTHER_ASSET_SHEETS = {
+    "inside cupboard",
+    "inside the cupboard",
 }
 
 # sheet tab name (normalized) -> number of leading rows to drop BEFORE the
@@ -362,12 +397,10 @@ SHEET_TAG_COLUMN_HINTS = {
 # block, not treated as an error.
 SHEET_BLOCK_SPLITS = {
     "employee list": [
-        [0, 1, 2],  # EmployeeName / Employee Id / Status (block 1)
-        [3, 4, 5],  # Employee Name / Id / Status (block 2, no spacer column)
+        [0, 1, 2],  # EmployeeName / Employee Id / Status (only Block 1)
     ],
     "employee": [
-        [0, 1, 2],  # EmployeeName / Employee Id / Status (block 1)
-        [3, 4, 5],  # Employee Name / Id / Status (block 2, no spacer column)
+        [0, 1, 2],  # EmployeeName / Employee Id / Status (only Block 1)
     ],
 }
 
@@ -393,7 +426,7 @@ EMPLOYEE_NAME_AS_ID_FALLBACK_SHEETS = {"employee list", "employee"}
 # treat a value as "not an ID" when it fails THIS check — not merely because
 # it contains a space — since we haven't confirmed spaces never appear in a
 # real ID.
-EMPLOYEE_ID_PATTERN = re.compile(r"^[A-Za-z]+\d+$")
+EMPLOYEE_ID_PATTERN = re.compile(r"^(?:[A-Za-z]+[\s\-_]*)?\d+[A-Za-z\d\-_]*$|^[A-Za-z]+[\-_][A-Za-z\d\-_]+$")
 
 
 def _looks_like_employee_id(text):
@@ -484,6 +517,153 @@ def _split_sheet_into_blocks(sheet_name, header, data_rows, block_col_groups):
         label = f"{sheet_name} (item {block_num})" if len(block_col_groups) > 1 else sheet_name
         blocks.append((label, sub_header, sub_rows, list(cols)))
     return blocks
+
+
+def _parse_inside_cupboard_sheet_rows(rows, existing_tags=None, seen_tags=None):
+    """Parses the complex multi-section 'Inside Cupboard' sheet into clean,
+    professional asset records with:
+      - Location = 'In Cupboard'
+      - Meaningful descriptive names ('Seagate 500GB Internal HDD', 'DDR 128MB RAM', 'LG DVD Writer')
+      - Clean sequential tags ('IC-001', 'IC-002', ...)
+      - Captured serial numbers, sizes, and conditions in extra_details
+    """
+    items = []
+
+    # 1. Block 1: Internal Hard Disks (cols 0-3, top rows)
+    for r in rows[1:14]:
+        brand = _cell_text(r[0] if len(r) > 0 else '')
+        size = _cell_text(r[1] if len(r) > 1 else '')
+        sno = _cell_text(r[2] if len(r) > 2 else '')
+        cond = _cell_text(r[3] if len(r) > 3 else '')
+        if not brand and not size and not sno:
+            continue
+        if brand.lower() in ('internal hard disk', 'graphics card s.no'):
+            continue
+        name = f"{brand} {size} Internal HDD".strip()
+        items.append({
+            'name': name,
+            'brand': brand or 'Seagate',
+            'serial_number': sno,
+            'conditions': cond,
+            'status': 'working' if 'work' in cond.lower() else ('maintenance' if cond else 'working'),
+            'item_type': 'Hard Disk',
+            'size': size,
+        })
+
+    # 2. Block 2: Internal HDDs (cols 6-9, top section up to row 15)
+    for r in rows[1:]:
+        if len(r) <= 6:
+            continue
+        brand = _cell_text(r[6] if len(r) > 6 else '')
+        size = _cell_text(r[7] if len(r) > 7 else '')
+        sno = _cell_text(r[8] if len(r) > 8 else '')
+        cond = _cell_text(r[9] if len(r) > 9 else '')
+        if not brand and not size and not sno:
+            continue
+        if brand.lower() in ('internal hdd', 'internal hard disk', 'updated'):
+            continue
+        if not re.search(r'\b\d+(?:gb|tb|mb)\b', size, re.I) and brand.lower() not in ('seagate', 'segate', 'samsung', 'toshiba', 'wd'):
+            continue
+
+        if brand.lower() == 'segate':
+            brand = 'Seagate'
+        name = f"{brand} {size} Internal HDD".strip()
+        items.append({
+            'name': name,
+            'brand': brand or 'Seagate',
+            'serial_number': sno,
+            'conditions': cond,
+            'status': 'working' if 'work' in cond.lower() or cond.lower() == 'new' else ('maintenance' if cond else 'working'),
+            'item_type': 'Hard Disk',
+            'size': size,
+        })
+
+    # 3. Sub-table: Cards (col 0), RAM (cols 2-4), Accessories (col 6) in bottom section
+    card_type = 'Graphics Card'
+    for r in rows[14:]:
+        col0 = _cell_text(r[0] if len(r) > 0 else '')
+        if col0:
+            if 'vga' in col0.lower():
+                card_type = 'VGA Card'
+            elif 'sound' in col0.lower():
+                card_type = 'Sound Card'
+            elif 'graphics' in col0.lower():
+                card_type = 'Graphics Card'
+            else:
+                items.append({
+                    'name': f"{card_type}",
+                    'brand': card_type,
+                    'serial_number': col0,
+                    'conditions': 'In Cupboard storage',
+                    'status': 'working',
+                    'item_type': 'Graphics / Sound Card',
+                    'size': '',
+                })
+
+        # RAM (cols 2, 3, 4)
+        ram_size = _cell_text(r[2] if len(r) > 2 else '')
+        ram_model = _cell_text(r[3] if len(r) > 3 else '')
+        ram_sno = _cell_text(r[4] if len(r) > 4 else '')
+        if ram_size and ram_size.lower() not in ('ram', 'no identiy', 'size'):
+            name = f"{ram_model} {ram_size} RAM".strip()
+            items.append({
+                'name': name,
+                'brand': ram_model or 'RAM',
+                'serial_number': ram_sno if ram_sno.lower() != 'without label' else '',
+                'conditions': 'In Cupboard storage',
+                'status': 'working',
+                'item_type': 'RAM',
+                'size': ram_size,
+            })
+        elif ram_size.lower() == 'no identiy':
+            items.append({
+                'name': f"{ram_model} RAM (No Identity)".strip(),
+                'brand': ram_model or 'RAM',
+                'serial_number': '',
+                'conditions': 'In Cupboard storage',
+                'status': 'working',
+                'item_type': 'RAM',
+                'size': '',
+            })
+
+        # Accessories / Boxes / Cables (col 6)
+        acc = _cell_text(r[6] if len(r) > 6 else '')
+        if acc and not acc.lower().startswith('segate') and acc.lower() not in ('internal hdd', 'updated'):
+            if not re.search(r'\b\d+(?:gb|tb)\b', acc, re.I) or 'box' in acc.lower() or 'adapter' in acc.lower():
+                items.append({
+                    'name': acc,
+                    'brand': 'Accessory',
+                    'serial_number': '',
+                    'conditions': 'In Cupboard storage',
+                    'status': 'working',
+                    'item_type': 'Accessory / Box',
+                    'size': '',
+                })
+
+    header = ["Asset Tag", "Name", "Brand", "Serial Number", "Status", "Location", "Item Type", "Size", "Condition Details"]
+    data_rows = []
+    tag_counter = 1
+    existing_tags = existing_tags or set()
+    seen_tags = seen_tags or set()
+    for itm in items:
+        while f"ic-{tag_counter:03d}" in existing_tags or f"ic-{tag_counter:03d}" in seen_tags:
+            tag_counter += 1
+        tag = f"IC-{tag_counter:03d}"
+        seen_tags.add(tag.lower())
+        tag_counter += 1
+        data_rows.append([
+            tag,
+            itm['name'],
+            itm['brand'],
+            itm['serial_number'],
+            itm['status'],
+            'In Cupboard',
+            itm['item_type'],
+            itm['size'],
+            itm['conditions'],
+        ])
+
+    return header, data_rows
 
 
 def parse_uploaded_workbook_sheets(uploaded_file):
@@ -577,11 +757,26 @@ def parse_uploaded_workbook_sheets(uploaded_file):
             skipped_sheets.append((sheet_name, "no data rows below the header row"))
             continue
 
-        cat = categories_by_norm_name.get(norm_name)
-        if not cat:
-            alias_target = SHEET_NAME_ALIASES.get(norm_name)
-            if alias_target:
-                cat = categories_by_norm_name.get(_normalize_header(alias_target))
+        if norm_name in FORCE_OTHER_ASSET_SHEETS:
+            cupboard_header, cupboard_data_rows = _parse_inside_cupboard_sheet_rows(rows)
+            if cupboard_data_rows:
+                total_rows += len(cupboard_data_rows)
+                sheets.append((
+                    sheet_name,
+                    cupboard_header,
+                    cupboard_data_rows,
+                    fallback_cat,
+                    list(range(len(cupboard_header)))
+                ))
+            continue
+
+        cat = None
+        if norm_name not in FORCE_OTHER_ASSET_SHEETS:
+            cat = categories_by_norm_name.get(norm_name)
+            if not cat:
+                alias_target = SHEET_NAME_ALIASES.get(norm_name)
+                if alias_target:
+                    cat = categories_by_norm_name.get(_normalize_header(alias_target))
         used_fallback = False
         if not cat:
             cat = fallback_cat
@@ -659,6 +854,7 @@ def validate_workbook_sheets(sheets):
     # (validated in two separate calls) keep counting placeholder IDs up
     # from where the other block left off, instead of both starting at 1.
     employee_placeholder_counter = [1]
+    seen_employee_names = {}
     row_warnings = []
     existing_fingerprints = _load_existing_fingerprints()
     template_notices = []  # (sheet_name, missing_headers, unexpected_headers)
@@ -678,12 +874,6 @@ def validate_workbook_sheets(sheets):
         base_name_for_template = re.sub(r"\s*\(item \d+\)$", "", sheet_name)
         sheet_template = get_sheet_template(base_name_for_template)
         if sheet_template is not None and sheet_name == base_name_for_template:
-            # Only run the header diff for a sheet call that IS the whole
-            # sheet (sheet_name has no "(item N)" suffix) — a block-split
-            # sheet's block is already a known subset of the template by
-            # construction (see SHEET_BLOCK_SPLITS), so diffing a block's
-            # few columns against the FULL template would wrongly report
-            # the other block's columns as "missing" every time.
             missing, unexpected = _diff_template_headers(base_name_for_template, header_row)
             if missing or unexpected:
                 template_notices.append((sheet_name, missing, unexpected))
@@ -691,14 +881,6 @@ def validate_workbook_sheets(sheets):
         if "asset_tag" not in col_to_field.values():
             tag_fallback_idx = _resolve_tag_fallback_idx(sheet_name, header_row, col_to_field)
 
-        # Collision-tracking name: normally the block's own label (so e.g.
-        # "Inside Cupboard (item 1)" and "(item 2)" count as different
-        # sheets, and a shared tag between them auto-suffixes as a
-        # coincidence). But for a block-split sheet in
-        # SHEET_BLOCK_SPLITS_SAME_ENTITY, both blocks describe the same
-        # real-world list — so they share one collision name (the sheet's
-        # base name, item-suffix stripped) and a repeated tag between them
-        # is resolved as an ordinary same-sheet duplicate (later wins).
         base_name = re.sub(r"\s*\(item \d+\)$", "", sheet_name)
         collision_name = (
             base_name if _normalize_header(base_name) in SHEET_BLOCK_SPLITS_SAME_ENTITY
@@ -715,6 +897,7 @@ def validate_workbook_sheets(sheets):
             row_warnings=row_warnings,
             sheet_template=sheet_template, orig_col_indices=orig_col_indices,
             existing_fingerprints=existing_fingerprints,
+            seen_employee_names=seen_employee_names,
         )
         for r in results:
             r["sheet"] = sheet_name
@@ -770,9 +953,9 @@ def map_headers(header_row, require_category=True, require_name_and_tag=True, sh
         if not norm:
             continue
         field = None
-        if sheet_overrides:
-            field = sheet_overrides.get(norm)
-        if not field:
+        if sheet_overrides is not None and norm in sheet_overrides:
+            field = sheet_overrides[norm]
+        else:
             field = label_to_field.get(norm) or HEADER_ALIASES.get(norm)
         if field:
             field_to_cols.setdefault(field, []).append(idx)
@@ -975,7 +1158,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                           same_entity_tag_results=None, employee_id_fallback=False,
                           employee_placeholder_counter=None, row_warnings=None,
                           sheet_template=None, orig_col_indices=None,
-                          existing_fingerprints=None):
+                          existing_fingerprints=None, seen_employee_names=None):
     """Validates the rows of ONE sheet. `existing_tags` and `seen_tags_in_file`
     are shared across sheets by the caller so asset-tag duplicates are caught
     across the whole workbook, not just within one sheet.
@@ -1030,6 +1213,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         errors = []
         fields = {}
         raw_display = {}
+        raw_name_value = _cell_text(row_map.get("name"))
 
         # Category
         category_display_name = None  # used below to build a default Name
@@ -1357,8 +1541,10 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
             hdd_ref = extra_details.get("Hard disk Name")
             if hdd_ref:
                 from .relations import resolve_asset_reference
+                ref_clean = str(hdd_ref).strip().lower()
+                stripped = re.sub(r'\s+\d+(?:tb|gb|mb)$', '', ref_clean, flags=re.I).strip()
                 resolved_hdd = resolve_asset_reference(hdd_ref, "Hard Disk")
-                if not resolved_hdd and str(hdd_ref).strip().lower() not in seen_tags_in_file:
+                if not resolved_hdd and ref_clean not in seen_tags_in_file and stripped not in seen_tags_in_file:
                     if row_warnings is not None:
                         row_warnings.append((
                             current_sheet_name, i,
@@ -1367,8 +1553,10 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
             mirror_ref = extra_details.get("Backup Available HDD")
             if mirror_ref:
                 from .relations import resolve_asset_reference
+                ref_clean = str(mirror_ref).strip().lower()
+                stripped = re.sub(r'\s+\d+(?:tb|gb|mb)$', '', ref_clean, flags=re.I).strip()
                 resolved_mirror = resolve_asset_reference(mirror_ref, "Hard Disk")
-                if not resolved_mirror and str(mirror_ref).strip().lower() not in seen_tags_in_file:
+                if not resolved_mirror and ref_clean not in seen_tags_in_file and stripped not in seen_tags_in_file:
                     if row_warnings is not None:
                         row_warnings.append((
                             current_sheet_name, i,
@@ -1418,6 +1606,18 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         results.append(this_result)
         if pending_tag_key is not None:
             same_entity_tag_results[pending_tag_key] = this_result
+
+        if category_display_name in ("Employee", "Employee List") and raw_name_value and this_result["is_valid"]:
+            emp_name_key = raw_name_value.strip().lower()
+            if seen_employee_names is not None:
+                if emp_name_key in seen_employee_names:
+                    prev_row_num, prev_res = seen_employee_names[emp_name_key]
+                    if prev_res is not None and prev_res is not this_result:
+                        prev_res["is_valid"] = False
+                        prev_res["errors"] = [
+                            f"Superseded by updated record (row {i}) with Employee ID '{tag}'"
+                        ]
+                seen_employee_names[emp_name_key] = (i, this_result)
 
     return results
 

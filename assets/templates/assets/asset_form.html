@@ -25,61 +25,58 @@
                 {{ form.branch }}
                 {{ form.branch.errors }}
             </div>
-            <div class="col-md-6">
+            <div class="col-md-6" id="field-wrap-asset-tag">
                 <label class="form-label fw-semibold" id="label-asset-tag">{% if employee_form %}Employee ID{% else %}Asset Tag{% endif %}</label>
                 {{ form.asset_tag }}
-                <div class="form-text" id="help-asset-tag">{% if not employee_form %}Unique ID, e.g. WS001, M009, K014, U006{% endif %}</div>
+                <div class="form-text" id="help-asset-tag">{% if not employee_form %}Unique ID{% endif %}</div>
                 {{ form.asset_tag.errors }}
             </div>
-            <div class="col-md-6">
+            <div class="col-md-6" id="field-wrap-name">
                 <label class="form-label fw-semibold" id="label-name">{% if employee_form %}Employee Name{% else %}Name{% endif %}</label>
                 {{ form.name }}
                 {{ form.name.errors }}
             </div>
 
             <div class="col-md-6" data-common-field="status">
-                <label class="form-label fw-semibold">Status</label>
+                <label class="form-label fw-semibold" id="label-status">Status</label>
                 {{ form.status }}
             </div>
-            <div class="col-md-4" data-common-field="brand">
-                <label class="form-label fw-semibold">Brand</label>
+            <div class="col-md-6" data-common-field="brand">
+                <label class="form-label fw-semibold" id="label-brand">Brand</label>
                 {{ form.brand }}
             </div>
-            <div class="col-md-4" data-common-field="model_number">
-                <label class="form-label fw-semibold">Model Number</label>
+            <div class="col-md-6" data-common-field="model_number">
+                <label class="form-label fw-semibold" id="label-model-number">Model Number</label>
                 {{ form.model_number }}
             </div>
-            <div class="col-md-4" data-common-field="serial_number">
-                <label class="form-label fw-semibold">Serial Number</label>
+            <div class="col-md-6" data-common-field="serial_number">
+                <label class="form-label fw-semibold" id="label-serial-number">Serial Number</label>
                 {{ form.serial_number }}
             </div>
             <div class="col-md-6" data-common-field="current_assigned_to">
-                <label class="form-label fw-semibold">Current Assigned To</label>
+                <label class="form-label fw-semibold" id="label-current-assigned-to">Current Assigned To</label>
                 {{ form.current_assigned_to }}
-                <div class="form-text">Current user / employee / location</div>
             </div>
             <div class="col-md-6" data-common-field="current_location">
-                <label class="form-label fw-semibold">Current Location</label>
+                <label class="form-label fw-semibold" id="label-current-location">Current Location</label>
                 {{ form.current_location }}
             </div>
             <div class="col-md-6" data-common-field="linked_workstation">
-                <label class="form-label fw-semibold">Linked Workstation</label>
+                <label class="form-label fw-semibold" id="label-linked-workstation">Linked Workstation</label>
                 {{ form.linked_workstation }}
-                <div class="form-text">Workstation ID this item is used in, e.g. WS004 (optional)</div>
             </div>
-            <div class="col-md-3" data-common-field="purchase_date">
-                <label class="form-label fw-semibold">Purchase Date</label>
+            <div class="col-md-6" data-common-field="purchase_date">
+                <label class="form-label fw-semibold" id="label-purchase-date">Purchase Date</label>
                 {{ form.purchase_date }}
             </div>
-            <div class="col-md-3" data-common-field="last_service_date">
-                <label class="form-label fw-semibold">Last Service Date</label>
+            <div class="col-md-6" data-common-field="last_service_date">
+                <label class="form-label fw-semibold" id="label-last-service-date">Last Service Date</label>
                 {{ form.last_service_date }}
             </div>
 
-            <div class="col-12" id="category-extra-fields-wrap" style="display:none;">
-                <hr>
-                <h6 class="fw-bold text-secondary mb-3" id="category-extra-fields-title"></h6>
-                <div class="row g-3" id="category-extra-fields"></div>
+            <!-- Extra category fields rendered seamlessly inline -->
+            <div class="col-12 p-0 m-0" id="category-extra-fields-wrap" style="display:none;">
+                <div class="row g-3 m-0 p-0" id="category-extra-fields"></div>
             </div>
 
             <div class="col-12">
@@ -125,11 +122,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const categorySelect = document.getElementById('id_category');
     const branchSelect = document.getElementById('id_branch');
     const extraWrap = document.getElementById('category-extra-fields-wrap');
-    const extraTitle = document.getElementById('category-extra-fields-title');
     const extraContainer = document.getElementById('category-extra-fields');
     const labelAssetTag = document.getElementById('label-asset-tag');
     const helpAssetTag = document.getElementById('help-asset-tag');
     const labelName = document.getElementById('label-name');
+    const wrapName = document.getElementById('field-wrap-name');
 
     function escapeAttr(str) {
         return String(str == null ? '' : str)
@@ -218,15 +215,29 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         if (cfg) {
-            labelAssetTag.textContent = cfg.tag_label;
-            helpAssetTag.textContent = cfg.asset_tag_help;
-            labelName.textContent = cfg.name_label;
+            labelAssetTag.textContent = cfg.tag_label || 'Asset Tag';
+            helpAssetTag.textContent = cfg.asset_tag_help || '';
+            labelName.textContent = cfg.name_label || 'Name';
+            if (wrapName) {
+                wrapName.style.display = cfg.show_name ? '' : 'none';
+            }
+
+            const labelSerial = document.getElementById('label-serial-number');
+            if (labelSerial) labelSerial.textContent = cfg.serial_label || 'Serial Number';
+
+            const labelLoc = document.getElementById('label-current-location');
+            if (labelLoc) labelLoc.textContent = cfg.location_label || 'Current Location';
+
+            const labelAssigned = document.getElementById('label-current-assigned-to');
+            if (labelAssigned) labelAssigned.textContent = cfg.assigned_label || 'Current Assigned To';
+
+            const labelModel = document.getElementById('label-model-number');
+            if (labelModel) labelModel.textContent = cfg.model_label || 'Model Number';
         }
 
         extraContainer.innerHTML = '';
         if (cfg && cfg.extra_fields.length) {
             extraWrap.style.display = '';
-            extraTitle.textContent = cfg.name + ' Information';
             cfg.extra_fields.forEach(function (field) {
                 const value = preserveValues ? EXISTING_EXTRA[field.name] : '';
                 extraContainer.insertAdjacentHTML('beforeend', fieldHtml(field, value));

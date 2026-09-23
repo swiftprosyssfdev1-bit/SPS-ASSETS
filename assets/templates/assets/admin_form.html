@@ -12,13 +12,11 @@
 <div class="card card-stat p-4 mx-auto" style="max-width: 560px;">
     <form method="post">
         {% csrf_token %}
-        {% if not admin_user %}
         <div class="mb-3">
             <label class="form-label fw-semibold">Username</label>
             {{ form.username }}
             {{ form.username.errors }}
         </div>
-        {% endif %}
         <div class="mb-3">
             <label class="form-label fw-semibold">Email</label>
             {{ form.email }}

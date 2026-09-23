@@ -63,26 +63,25 @@ SHEET_TEMPLATES = {
         "System Type", "Motherboard Type", "HardDisk Name",
         "HardDisk Serial No.", "Graphics Card Serial No.", "HardDisk Size",
         "RAM", "RAM Model", "RAM Size", "DVD", "CD", "Extra", "Remark",
-        "Last Service Date", "Antivirus", "Condition", "Notes",
-        None, "others", None,
+        "Last Service Date", "Antivirus", "Condition", "Notes", "others",
     ),
 
     "keyboard": _cols(
-        "Keyboard Id", "Brand", "Status", "S.No", None, "Location", None,
+        "Keyboard Id", "Brand", "Status", "S.No", "Location",
     ),
 
     "monitor": _cols(
         "Monitor No", "Brand", "Type", "Color", "Size", "Model",
-        "Serial No", "Condition", None, None,
+        "Serial No", "Condition",
     ),
 
     "mouse": _cols(
-        "Mouse", "Brand", "Status", None, "S.No", "Location",
+        "Mouse", "Brand", "Status", "S.No", "Location",
     ),
 
     "ups": _cols(
         "UPS No", "Brand", "Color", "Model No", "Size", "Last Service Date",
-        "Condition", "Details", "Current Status", None, None, None,
+        "Condition", "Details", "Current Status",
     ),
 
     "bluetooth": _cols(
@@ -90,7 +89,7 @@ SHEET_TEMPLATES = {
     ),
 
     "others": _cols(
-        "ID", "Device Type", "Device Name", "Status", "Details", None,
+        "ID", "Device Type", "Device Name", "Status", "Details",
     ),
 
     "software and os": _cols(
@@ -99,19 +98,17 @@ SHEET_TEMPLATES = {
 
     "hard disk": _cols(
         "Hard disk  Number", "Hard Disk Name", "Size", "Serial No",
-        "Conditions", "Purpose", "Details", "Current Status",
+        "Conditions", "Purpose", "Status", "Current Status",
     ),
 
     "workstation": _cols(
         "Workstation ID", "Employee ID", "Employee Name", "CPU Number",
         "Monitor Number", "Keyboard Number", "Mouse Number", "UPS No.",
         "Product Id", "Cd Key", "Operating System", "Purposes", "User Id",
-        None,
     ),
 
     "employee_list": _cols(
         "EmployeeName", "Employee Id", "Status",
-        "Employee Name", "Id", "Status",
     ),
 
     "project details": _cols(
@@ -120,21 +117,53 @@ SHEET_TEMPLATES = {
 
     "project backup": _cols(
         "Hard disk Name", "Projects", "Project Manager", "Date",
-        "Space Free", "Backup Available HDD", None, None,
+        "Space Free", "Backup Available HDD",
     ),
 
     "inside cupboard": _cols(
-        "Item / Description", "Asset Tag", "Serial No.", "Status", "Location / Storage Notes"
+        "Asset Tag", "Name", "Brand", "Serial Number", "Status",
+        "Location", "Item Type", "Size", "Condition Details",
     ),
 
     "it vendor": _cols(
         "S.No", "Vendor Name", "Contact Person", "Mobile No",
-        "Types of Service", "Details 1", "Details 2", None,
+        "Types of Service", "Details 1", "Details 2",
     ),
 
     "incident register": _cols(
         "S.No", "Incident Type", "Incident Description",
         "Start Date&Time", "End Date&Time",
+    ),
+
+    "air conditioner": _cols(
+        "Asset Tag", "Name", "Status", "Notes",
+    ),
+
+    "biometric device": _cols(
+        "Asset Tag", "Name", "Status", "Details", "Device Type",
+    ),
+
+    "bluetooth device": _cols(
+        "Bluetooth No", "Devices", "Brand", "Remark", "User Name",
+    ),
+
+    "laptop": _cols(
+        "Asset Tag", "Name", "Brand", "Serial Number", "Status",
+        "Current Location", "Notes",
+    ),
+
+    "networking equipment": _cols(
+        "Asset Tag", "Name", "Brand", "Serial Number", "Status",
+        "Current Location", "Notes",
+    ),
+
+    "other asset": _cols(
+        "Asset Tag", "Name", "Brand", "Serial Number", "Status",
+        "Current Location", "Notes",
+    ),
+
+    "software - os license": _cols(
+        "Type", "Version", "Product Key", "System No", "Details",
     ),
 }
 
@@ -144,8 +173,10 @@ SHEET_NAME_TEMPLATE_ALIASES = {
     "workstation_list": "workstation",
     "inside the cupboard": "inside cupboard",
     "it_vendor list": "it vendor",
-    "bluetooth device": "bluetooth",
+    "bluetooth": "bluetooth device",
     "employee": "employee_list",
+    "software and os": "software - os license",
+    "software / os license": "software - os license",
 }
 
 # AssetCategory.name (normalized) -> template key. This is how the export
@@ -160,18 +191,18 @@ CATEGORY_TO_TEMPLATE = {
     "keyboard": "keyboard",
     "mouse": "mouse",
     "ups": "ups",
-    "bluetooth device": "bluetooth",
+    "bluetooth device": "bluetooth device",
     "hard disk": "hard disk",
-    "software / os license": "software and os",
+    "software - os license": "software - os license",
+    "software / os license": "software - os license",
     "project details": "project details",
     "project backup": "project backup",
-    "inside cupboard": "inside cupboard",
     "it vendor": "it vendor",
     "incident register": "incident register",
-    # Air Conditioner, Biometric Device, Networking Equipment, Other Asset
-    # intentionally have NO template: those categories are sub-slices of
-    # the catch-all "others" tab, routed row-by-row by device type, not a
-    # single 1:1 sheet — see DEVICE_TYPE_CATEGORY_ALIASES in import_utils.
+    # Air Conditioner, Biometric Device, Laptop, Networking Equipment, and
+    # Other Asset intentionally have NO template in CATEGORY_TO_TEMPLATE:
+    # they use Django's standard common Asset fields (Brand, Model Number,
+    # Serial Number, Status, Location, Assigned To, Notes) without extra fields.
 }
 
 
