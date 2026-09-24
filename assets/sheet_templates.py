@@ -135,8 +135,11 @@ SHEET_TEMPLATES = {
         "Start Date&Time", "End Date&Time",
     ),
 
+    # Matches the Air Conditioner category page / Add-Edit form:
+    # Tag, Name, Capacity / Location, Status, Serviced (Branch comes from
+    # the branch chosen at import time, not from a column).
     "air conditioner": _cols(
-        "Asset Tag", "Name", "Status", "Notes",
+        "Asset Tag", "Name", "Capacity / Location", "Status", "Serviced",
     ),
 
     "biometric device": _cols(

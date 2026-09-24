@@ -83,6 +83,9 @@ HEADER_ALIASES = {
 # {normalized_header: field} shape as HEADER_ALIASES, checked with priority
 # over the global table by map_headers() when a sheet_name is given.
 SHEET_HEADER_OVERRIDES = {
+    "air conditioner": {
+        "serviced": "last_service_date",
+    },
     "workstation": {
         "workstation id": "asset_tag",
         "employee name": "current_assigned_to",
@@ -1533,6 +1536,16 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 value = _cell_text(raw_row[idx] if idx < len(raw_row) else "")
                 if value:
                     extra_details[header_text] = value
+
+        # Air Conditioner: the sheet's "Capacity / Location" column is stored
+        # under the clean "capacity_location" key the category page, View
+        # page and Add/Edit form all read. Status and Serviced already went
+        # to the real status / last_service_date fields above, so the raw
+        # template copies are dropped — otherwise a leftover "Status" key
+        # would show up as the capacity in the legacy-fallback display.
+        if (category_display_name or "").strip().lower() == "air conditioner":
+            capacity = extra_details.get("Capacity / Location", "")
+            extra_details = {"capacity_location": capacity} if capacity else {}
 
         fields["extra_details"] = extra_details
 

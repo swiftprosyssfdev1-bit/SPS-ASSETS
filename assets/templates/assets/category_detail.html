@@ -194,7 +194,7 @@
                         {% with summary_val=a.extra_details|get_item:list_summary_field.name %}
                             {% with resolved_asset=summary_val|resolve_asset %}
                                 {% if resolved_asset %}
-                                <a href="{% url 'assets:asset_detail' resolved_asset.id %}" class="badge bg-primary-subtle text-primary border text-decoration-none" title="View {{ resolved_asset.asset_tag }}">
+                                <a href="{% url 'assets:asset_detail' resolved_asset.id %}?back={{ request.get_full_path|urlencode:'' }}" class="badge bg-primary-subtle text-primary border text-decoration-none" title="View {{ resolved_asset.asset_tag }}">
                                     <i class="bi bi-link-45deg me-1"></i>{{ summary_val }}
                                 </a>
                                 {% else %}
@@ -268,7 +268,7 @@
                     </td>
                     {% endif %}
                     <td class="text-end">
-                        <a href="{% url 'assets:asset_detail' a.id %}" class="btn btn-sm btn-outline-secondary">View</a>
+                        <a href="{% url 'assets:asset_detail' a.id %}?back={{ request.get_full_path|urlencode:'' }}" class="btn btn-sm btn-outline-secondary">View</a>
                         <a href="{% url 'assets:asset_update' a.id %}" class="btn btn-sm btn-outline-secondary">Edit</a>
                     </td>
                 </tr>

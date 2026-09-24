@@ -22,10 +22,10 @@ SHEET_ORDER = [
 
 SHEET_DATA = {
     'Air Conditioner': [
-        ['Asset Tag', 'Name', 'Status', 'Notes'],
-        ['A/C001', 'Onida', 'Other', 'Status note: 1.5 TON, ADMIN ROOM'],
-        ['A/C002', 'Onida', 'Other', 'Status note: 1.5 TON, MIDDLE LEFT OF OFFICE'],
-        ['A/C003(Rented)', 'Videocon', 'Other', 'Status note: 1 TON, HEAD OFFICE ROOM'],
+        ['Asset Tag', 'Name', 'Capacity / Location', 'Status', 'Serviced'],
+        ['A/C001', 'Onida', '1.5 TON, ADMIN ROOM', 'Working', '2020-02-28'],
+        ['A/C002', 'Onida', '1.5 TON, MIDDLE LEFT OF OFFICE', 'Working', '2020-02-28'],
+        ['A/C003(Rented)', 'Videocon', '1 TON, HEAD OFFICE ROOM', 'Working', '2020-02-28'],
     ],
     'Biometric Device': [
         ['Asset Tag', 'Name', 'Status', 'Device Type', 'Details'],

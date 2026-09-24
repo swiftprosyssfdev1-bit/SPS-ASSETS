@@ -11,6 +11,7 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -112,6 +113,32 @@ def clear_all_assets(request):
 ATTENTION_STATUSES = ["not_working", "service", "missing"]
 
 
+# Order of the category cards on the dashboard (normalized names). Categories
+# not listed here (e.g. custom ones) go after these, A-Z, but before Other
+# Asset, which is always last. Edit this list to reorder the cards.
+DASHBOARD_CARD_ORDER = [
+    "workstation",
+    "cpu / system unit",
+    "monitor",
+    "keyboard",
+    "mouse",
+    "ups",
+    "laptop",
+    "hard disk",
+    "software / os license",
+    "software - os license",
+]
+
+
+def _dashboard_card_sort_key(cat):
+    name = cat.name.strip().lower()
+    if name.rstrip("s") == "other asset":
+        return (2, 0, "")
+    if name in DASHBOARD_CARD_ORDER:
+        return (0, DASHBOARD_CARD_ORDER.index(name), "")
+    return (1, 0, name)
+
+
 @login_required
 def dashboard(request):
     selected_branch, accessible_branches = resolve_selected_branch(request)
@@ -168,6 +195,8 @@ def dashboard(request):
         # so the grouped categories are still reachable.
         for cat in grouped_categories:
             main_categories.append(cat)
+
+    main_categories.sort(key=_dashboard_card_sort_key)
 
     branch_scoped = Asset.objects.filter(is_active=True)
     branch_scoped = filter_assets_to_branch(
@@ -615,6 +644,47 @@ def asset_update(request, asset_id):
     })
 
 
+def _resolve_back_link(request, default_url, default_label):
+    """Where the View page's "Back" button should go.
+
+    Cross-links (e.g. a Workstation's Employee ID badge) add ?back=<the page
+    the person was on>, so Back returns there instead of always jumping to
+    the asset's own category. Only same-site paths that resolve to a known
+    page are accepted (no open redirect); anything else falls back to the
+    default (the asset's category page).
+    """
+    from urllib.parse import urlparse
+    from django.urls import resolve, Resolver404
+    from django.utils.http import url_has_allowed_host_and_scheme
+
+    back = (request.GET.get("back") or "").strip()
+    if not back or not back.startswith("/") or back.startswith("//"):
+        return default_url, default_label
+    if not url_has_allowed_host_and_scheme(
+        back, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return default_url, default_label
+    try:
+        match = resolve(urlparse(back).path)
+    except Resolver404:
+        return default_url, default_label
+
+    name = match.url_name
+    if name == "category_detail":
+        cat = AssetCategory.objects.filter(pk=match.kwargs.get("category_id")).first()
+        if cat:
+            return back, f"Back to {cat.name}"
+    elif name == "asset_detail":
+        prev = Asset.objects.filter(pk=match.kwargs.get("asset_id")).first()
+        if prev and can_access_branch(request.user, prev.branch):
+            return back, f"Back to {prev.asset_tag}"
+    elif name == "dashboard":
+        return back, "Back to Dashboard"
+    elif name == "search_assets":
+        return back, "Back to Search"
+    return default_url, default_label
+
+
 @login_required
 def asset_detail(request, asset_id):
     """Read-only 'View' page — the complete record, organized into
@@ -646,8 +716,16 @@ def asset_detail(request, asset_id):
     forward_rels = get_forward_relationships(asset)
     reverse_rels = get_reverse_relationships(asset)
 
+    back_url, back_label = _resolve_back_link(
+        request,
+        reverse("assets:category_detail", args=[asset.category_id]),
+        f"Back to {asset.category.name}",
+    )
+
     return render(request, "assets/asset_detail.html", {
         "asset": asset,
+        "back_url": back_url,
+        "back_label": back_label,
         "detail_fields": detail_fields,
         "is_info_register": is_info_register,
         "forward_relationships": forward_rels,
@@ -859,6 +937,62 @@ EXPORT_COLUMNS = [
 ]
 
 
+def _extra(asset, key):
+    return (asset.extra_details or {}).get(key) or ""
+
+
+def _ac_capacity(asset):
+    # Same fallback order as the Air Conditioner list page.
+    return (
+        _extra(asset, "capacity_location")
+        or _extra(asset, "Status")  # legacy imports kept capacity text here
+        or asset.current_location
+        or ""
+    )
+
+
+def _ac_serviced(asset):
+    return asset.last_service_date or _extra(asset, "Details") or ""
+
+
+_STANDARD_7 = [
+    ("Asset Tag", lambda a: a.asset_tag),
+    ("Name", lambda a: a.name),
+    ("Brand", lambda a: a.brand),
+    ("Serial Number", lambda a: a.serial_number),
+    ("Status", lambda a: a.get_status_display()),
+    ("Current Location", lambda a: a.current_location),
+    ("Notes", lambda a: a.notes),
+]
+
+# Categories with NO registered sheet template whose export must match the
+# Import Template sheet (assets/sample_template.py) column-for-column, in the
+# same order — so a downloaded export can be edited and re-uploaded as-is.
+# Keep in sync with sample_template.SHEET_DATA.
+TEMPLATE_EXPORT_COLUMNS = {
+    "air conditioner": [
+        ("Asset Tag", lambda a: a.asset_tag),
+        ("Name", lambda a: a.name),
+        ("Capacity / Location", _ac_capacity),
+        ("Status", lambda a: a.get_status_display()),
+        ("Serviced", _ac_serviced),
+    ],
+    "biometric device": [
+        ("Asset Tag", lambda a: a.asset_tag),
+        ("Name", lambda a: a.name),
+        ("Status", lambda a: a.get_status_display()),
+        ("Device Type", lambda a: _extra(a, "Device Type")),
+        ("Details", lambda a: _extra(a, "Details") or a.current_location),
+    ],
+    "laptop": _STANDARD_7,
+    "networking equipment": _STANDARD_7,
+    # Other Asset is a catch-all bucket: the 7 standard columns come first,
+    # then any extra columns that really hold data (see export_assets), so
+    # nothing imported from the old Others / Inside Cupboard sheets is lost.
+    "other asset": _STANDARD_7,
+}
+
+
 def _safe_sheet_name(name, used_names):
     """Excel sheet names: max 31 chars, no \\ / ? * [ ] :"""
     clean = re.sub(r'[\\/?*\[\]:]', "-", name).strip()[:31]
@@ -898,7 +1032,34 @@ def export_assets(request):
         template = get_template_for_category(category.name)
         is_info_reg = category.name.strip().lower() in INFO_REGISTER_CATEGORIES
 
-        if template:
+        cat_key = category.name.strip().lower()
+        if not template and cat_key in TEMPLATE_EXPORT_COLUMNS:
+            # Match the Import Template sheet exactly (all its columns are
+            # always written, even when empty, like the templated sheets).
+            cols = TEMPLATE_EXPORT_COLUMNS[cat_key]
+            headers = [h for h, _ in cols]
+            asset_list = list(assets)
+            data_rows = [
+                [("" if (v := fn(a)) is None else v) for _, fn in cols]
+                for a in asset_list
+            ]
+            if cat_key == "other asset":
+                skip = {h.lower() for h in headers} | {l.lower() for l, _ in EXPORT_COLUMNS}
+                for f in get_category_fields(category):
+                    if f["label"].lower() in skip:
+                        continue
+                    vals = [(a, a.extra_details.get(f["name"], "")) for a in asset_list]
+                    filled = [(a, v) for a, v in vals if str(v).strip() != ""]
+                    if not filled:
+                        continue
+                    # Legacy copies of the tag / name (e.g. "ID", "Device
+                    # Name") add nothing — leave them out.
+                    if all(str(v).strip() in (a.asset_tag, a.name) for a, v in filled):
+                        continue
+                    headers.append(f["label"])
+                    for row, (_a, v) in zip(data_rows, vals):
+                        row.append(v)
+        elif template:
             # This category came from one of the original workbook's sheets
             # — reproduce that sheet's EXACT headers, order, and blank-header
             # column positions, instead of the generic Asset Tag/Name/Status
