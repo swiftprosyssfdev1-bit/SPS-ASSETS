@@ -26,6 +26,16 @@ CATEGORY_FIELDS = {
         {"name": "capacity_size", "label": "Capacity / Size", "type": "text"},
         {"name": "condition_notes", "label": "Condition / Notes", "type": "text"},
     ],
+    # Air Conditioner: legacy imported rows dumped everything (including
+    # capacity + install location) into the "Others" sheet's raw Status/
+    # Details columns (see category_detail.html / asset_detail view for how
+    # those get displayed for existing rows). Going forward, new/edited
+    # assets get one clean field for that instead of reusing the Status
+    # dropdown for it — real Status/Brand/Location/Last Service Date stay
+    # as normal common fields (see get_common_fields below).
+    "air conditioner": [
+        {"name": "capacity_location", "label": "Capacity / Location", "type": "text"},
+    ],
 }
 
 
@@ -201,9 +211,18 @@ def get_common_fields(category):
     the whole form. Only a category with nothing of its own configured
     falls back to the full generic set, so its Add Asset form isn't
     empty.
+
+    Air Conditioner is the one exception: it has its own curated
+    "Capacity / Location" field (see CATEGORY_FIELDS above) but should
+    still show the real Status/Brand/Current Location/Last Service Date
+    fields alongside it, rather than losing them the way a fully
+    self-contained category (Keyboard, Inside Cupboard, ...) does.
     """
     if category is None:
         return DEFAULT_COMMON_FIELDS
+    cat_name = category.name if hasattr(category, "name") else str(category or "")
+    if cat_name.strip().lower() == "air conditioner":
+        return ["status", "brand", "current_location", "last_service_date"]
     if get_category_fields(category):
         return []
     return DEFAULT_COMMON_FIELDS

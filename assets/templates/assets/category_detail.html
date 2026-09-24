@@ -62,6 +62,12 @@
                     {% elif is_project_details %}
                     <th>Project Name</th>
                     <th>Status</th>
+                    {% elif is_ac %}
+                    <th>Tag</th>
+                    <th>Name</th>
+                    <th>Capacity / Location</th>
+                    <th>Status</th>
+                    <th>Serviced</th>
                     {% elif is_info_register %}
                     <th>{{ tag_label }}</th>
                     {% if not hide_name %}<th>Name</th>{% endif %}
@@ -159,6 +165,26 @@
                     {% elif is_project_details %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    {% elif is_ac %}
+                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
+                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td>
+                        {% with cap=a.extra_details|get_item:"capacity_location" legacy_cap=a.extra_details|get_item:"Status" %}
+                            {{ cap|default:legacy_cap|default:a.current_location|default:"—" }}
+                        {% endwith %}
+                    </td>
+                    <td>
+                        {% if a.status == 'other' %}
+                        <span class="badge badge-status-working">Working</span>
+                        {% else %}
+                        <span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted">
+                        {% with det=a.extra_details|get_item:"Details" %}
+                            {{ a.last_service_date|default:det|default:"—" }}
+                        {% endwith %}
+                    </td>
                     {% elif is_info_register %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
                     {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}

@@ -370,6 +370,7 @@ def category_detail(request, category_id):
     is_cupboard = cat_norm in ("inside cupboard", "inside the cupboard")
     is_project_details = cat_norm == "project details"
     is_hard_disk = cat_norm == "hard disk"
+    is_ac = cat_norm == "air conditioner"
     hide_name = cat_norm in NO_REAL_NAME_CATEGORIES
     tag_label = TAG_LABEL_OVERRIDES.get(cat_norm, "Tag")
     category_fields = get_category_fields(category)
@@ -385,6 +386,7 @@ def category_detail(request, category_id):
         "is_cupboard": is_cupboard,
         "is_project_details": is_project_details,
         "is_hard_disk": is_hard_disk,
+        "is_ac": is_ac,
         "hide_name": hide_name,
         "tag_label": tag_label,
         "is_vendor": cat_norm == "it vendor",
@@ -619,12 +621,25 @@ def asset_detail(request, asset_id):
     sections, per the 'don't overload the list table' requirement."""
     asset = get_object_or_404(Asset, pk=asset_id)
     require_branch_access(request.user, asset.branch)
-    category_fields = get_category_fields(asset.category)
-    detail_fields = [
-        {"label": f["label"], "value": asset.extra_details.get(f["name"], "")}
-        for f in category_fields
-    ]
     cat_norm = asset.category.name.strip().lower()
+    if cat_norm == "air conditioner":
+        # New/edited rows store this cleanly under "capacity_location"
+        # (see category_fields.CATEGORY_FIELDS). Rows still on their
+        # original import keep the raw "Status"/"Details" columns mirrored
+        # from the old "Others" sheet template — fall back to those so
+        # nothing already in the database looks blank.
+        capacity_location = asset.extra_details.get("capacity_location") or asset.extra_details.get("Status", "")
+        serviced = asset.last_service_date or asset.extra_details.get("Details", "")
+        detail_fields = [
+            {"label": "Capacity / Location", "value": capacity_location},
+            {"label": "Serviced", "value": serviced},
+        ]
+    else:
+        category_fields = get_category_fields(asset.category)
+        detail_fields = [
+            {"label": f["label"], "value": asset.extra_details.get(f["name"], "")}
+            for f in category_fields
+        ]
     is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
     
     from .relations import get_forward_relationships, get_reverse_relationships

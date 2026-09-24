@@ -36,7 +36,13 @@
         </div>
         <div class="col-md-4">
             <div class="text-muted small">Status</div>
-            <div><span class="badge badge-status-{{ asset.status }}">{{ asset.get_status_display }}</span></div>
+            <div>
+                {% if asset.category.name|lower == "air conditioner" and asset.status == "other" %}
+                <span class="badge badge-status-working">Working</span>
+                {% else %}
+                <span class="badge badge-status-{{ asset.status }}">{{ asset.get_status_display }}</span>
+                {% endif %}
+            </div>
         </div>
         {% if not is_info_register %}
         <div class="col-md-4">
