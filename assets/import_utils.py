@@ -182,6 +182,18 @@ class ImportFileError(ValueError):
     """Raised when the uploaded file itself can't be read/understood."""
 
 
+def read_upload_bytes(uploaded_file):
+    """Reads an upload's bytes, decrypting it first if it's a password-
+    protected Excel file (an exported register — see excel_security)."""
+    from .excel_security import decrypt_if_encrypted, ExcelPasswordError
+
+    raw = uploaded_file.read()
+    try:
+        return decrypt_if_encrypted(raw)
+    except ExcelPasswordError as exc:
+        raise ImportFileError(str(exc))
+
+
 XLS_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # OLE2 compound doc — old .xls format
 
 
@@ -251,7 +263,7 @@ def parse_uploaded_file(uploaded_file):
     csv/txt/xlsx/xls file. Old .xls files are handled automatically even if
     they are misnamed as .csv or .xlsx."""
     filename = (uploaded_file.name or "").lower()
-    raw_bytes = uploaded_file.read()
+    raw_bytes = read_upload_bytes(uploaded_file)
 
     # Detect old .xls by magic bytes regardless of the file extension —
     # many users export from Excel and the file is still .xls inside.
@@ -696,7 +708,7 @@ def parse_uploaded_workbook_sheets(uploaded_file):
         to the admin as a heads-up, not an error.
     """
     filename = (uploaded_file.name or "").lower()
-    raw_bytes = uploaded_file.read()
+    raw_bytes = read_upload_bytes(uploaded_file)
 
     # Support old .xls files (even if misnamed as .xlsx)
     if _is_xls_bytes(raw_bytes):
@@ -1042,6 +1054,10 @@ def get_extra_columns(header_row, col_to_field):
             continue
         header_text = _cell_text(cell)
         if not header_text:
+            continue
+        if _normalize_header(header_text) == "branch":
+            # Exports carry a Branch column for reading; the branch itself is
+            # chosen on the import screen, so it must not be saved as data.
             continue
         seen_counts[header_text] = seen_counts.get(header_text, 0) + 1
         if seen_counts[header_text] > 1:
@@ -1407,6 +1423,8 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 # category + tag instead of rejecting every row (e.g.
                 # "Workstation SPS019").
                 name = f"{category_display_name} {tag}".strip() if tag else category_display_name
+                if category_display_name == "Project Details" and tag:
+                    name = tag  # the project name is the tag
                 raw_display["Name"] = name
                 fields["name"] = name
             else:
@@ -1430,9 +1448,10 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
 
         # Status
         status_text = _cell_text(row_map.get("status"))
-        raw_display["Status"] = status_text or "Working"
+        blank_default = "active" if category_display_name == "Project Details" else "working"
+        raw_display["Status"] = status_text or blank_default.title()
         if not status_text:
-            fields["status"] = "working"
+            fields["status"] = blank_default
         else:
             mapped = STATUS_LOOKUP.get(_normalize_header(status_text))
             if not mapped:

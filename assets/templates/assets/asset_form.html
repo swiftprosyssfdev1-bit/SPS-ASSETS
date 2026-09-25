@@ -127,6 +127,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const helpAssetTag = document.getElementById('help-asset-tag');
     const labelName = document.getElementById('label-name');
     const wrapName = document.getElementById('field-wrap-name');
+    const statusSelect = document.getElementById('id_status');
 
     function escapeAttr(str) {
         return String(str == null ? '' : str)
@@ -206,8 +207,30 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Status dropdown: only the statuses that suit the chosen category.
+    // On first load (keepCurrent) a saved legacy value outside the list is
+    // kept as an extra option; after a Category change it falls back to the
+    // category's default.
+    function setStatusChoices(cfg, keepCurrent) {
+        if (!statusSelect || !cfg || !cfg.status_choices) return;
+        const current = statusSelect.value;
+        const currentLabel = statusSelect.selectedIndex >= 0 ? statusSelect.options[statusSelect.selectedIndex].text : current;
+        const choices = cfg.status_choices.slice();
+        const allowed = choices.some(function (c) { return c[0] === current; });
+        if (!allowed && keepCurrent && current) choices.push([current, currentLabel]);
+        statusSelect.innerHTML = '';
+        choices.forEach(function (c) {
+            const opt = document.createElement('option');
+            opt.value = c[0];
+            opt.textContent = c[1];
+            statusSelect.appendChild(opt);
+        });
+        statusSelect.value = (allowed || (keepCurrent && current)) ? current : cfg.status_default;
+    }
+
     function applyCategory(categoryId, preserveValues) {
         const cfg = CONFIG[categoryId];
+        setStatusChoices(cfg, preserveValues);
 
         document.querySelectorAll('[data-common-field]').forEach(function (el) {
             const show = !!cfg && cfg.common_fields.indexOf(el.dataset.commonField) !== -1;
@@ -221,6 +244,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (wrapName) {
                 wrapName.style.display = cfg.show_name ? '' : 'none';
             }
+
+            const labelStatus = document.getElementById('label-status');
+            if (labelStatus) labelStatus.textContent = cfg.status_label || 'Status';
 
             const labelSerial = document.getElementById('label-serial-number');
             if (labelSerial) labelSerial.textContent = cfg.serial_label || 'Serial Number';

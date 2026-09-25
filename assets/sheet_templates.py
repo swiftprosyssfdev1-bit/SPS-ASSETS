@@ -268,5 +268,9 @@ def diff_headers(sheet_name, uploaded_header_row):
     uploaded_norms = {norm(h) for h in uploaded_header_row if norm(h)}
 
     missing = [c["header"] for c in tmpl if c["header"] and norm(c["header"]) not in uploaded_norms]
-    unexpected = [h for h in uploaded_header_row if norm(h) and norm(h) not in template_norms]
+    # "Branch" is added to every export sheet for reading; it's not an error.
+    unexpected = [
+        h for h in uploaded_header_row
+        if norm(h) and norm(h) not in template_norms and norm(h) != "branch"
+    ]
     return missing, unexpected

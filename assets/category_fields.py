@@ -186,9 +186,13 @@ CATEGORY_LABELS = {
         "tag_label": "S.No",
         "name_label": "Incident Type",
     },
+    # The project's name IS its unique tag (the sheet's "Project Name"
+    # column is imported as the asset tag), so there is one Project Name
+    # box — the separate Name field is hidden and kept equal to it.
     "project details": {
-        "tag_label": "S.No",
+        "tag_label": "Project Name",
         "name_label": "Project Name",
+        "show_name": False,
     },
     "project backup": {
         "tag_label": "Hard disk Name",
@@ -202,6 +206,35 @@ def get_category_field_labels(category):
     cat_name = category.name if hasattr(category, "name") else str(category or "")
     norm = cat_name.strip().lower()
     return CATEGORY_LABELS.get(norm, {})
+
+
+# Categories whose own sheet has a column that IS the record's status (the
+# importer feeds it into Asset.status). On the Add/Edit form that column is
+# shown as the real Status dropdown (limited to statuses that suit the
+# category) instead of a free-text box, so what's picked here is what the
+# category list page's status badge shows. Value = normalized header text.
+STATUS_DRIVER_COLUMN = {
+    "keyboard": "status",
+    "mouse": "status",
+    "hard disk": "status",
+    "employee": "status",
+    "employee list": "status",
+    "project details": "status",
+    "monitor": "condition",
+    "ups": "condition",
+    "cpu / system unit": "condition",
+    "cpu - system unit": "condition",
+}
+
+# Categories with no status column in their sheet that still track a status.
+STATUS_ONLY_CATEGORIES = {"incident register"}
+
+
+def status_driver_column(category):
+    """Normalized header of the sheet column that drives Asset.status for this
+    category (e.g. "status", "condition"), or None."""
+    cat_name = category.name if hasattr(category, "name") else str(category or "")
+    return STATUS_DRIVER_COLUMN.get(cat_name.strip().lower())
 
 
 def get_common_fields(category):
@@ -223,6 +256,8 @@ def get_common_fields(category):
     cat_name = category.name if hasattr(category, "name") else str(category or "")
     if cat_name.strip().lower() == "air conditioner":
         return ["status", "brand", "current_location", "last_service_date"]
+    if status_driver_column(category) or cat_name.strip().lower() in STATUS_ONLY_CATEGORIES:
+        return ["status"]
     if get_category_fields(category):
         return []
     return DEFAULT_COMMON_FIELDS

@@ -10,6 +10,8 @@ urlpatterns = [
     path("logout/", LogoutView.as_view(next_page="assets:login"), name="logout"),
     path("", views.dashboard, name="dashboard"),
     path("export/", views.export_assets, name="export_assets"),
+    path("export-password/", views.export_password_settings, name="export_password"),
+    path("account/", views.account_settings, name="account_settings"),
     path("clear-all/", views.clear_all_assets, name="clear_all_assets"),
     path("import/", views.bulk_import, name="bulk_import"),
     path("import/confirm/", views.bulk_import_confirm, name="bulk_import_confirm"),

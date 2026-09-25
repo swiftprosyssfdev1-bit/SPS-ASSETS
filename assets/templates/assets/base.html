@@ -288,12 +288,11 @@
                 <ul class="dropdown-menu dropdown-menu-end">
                     <li><a class="dropdown-item" href="{% url 'assets:branch_list' %}"><i class="bi bi-geo-alt me-2"></i>Branches</a></li>
                     <li><a class="dropdown-item" href="{% url 'assets:admin_list' %}"><i class="bi bi-people me-2"></i>Branch Admins</a></li>
+                    <li><a class="dropdown-item" href="{% url 'assets:export_password' %}"><i class="bi bi-file-earmark-lock me-2"></i>Export Password</a></li>
                 </ul>
             </div>
-            {% endif %}
-            {% if user.is_superuser %}
-            <a href="/admin/" class="btn btn-outline-secondary btn-sm">
-                <i class="bi bi-gear"></i> Admin Panel
+            <a href="{% url 'assets:account_settings' %}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-person-gear"></i> My Account
             </a>
             {% endif %}
             <span class="user-chip small">Hi, {{ user.get_username }}</span>

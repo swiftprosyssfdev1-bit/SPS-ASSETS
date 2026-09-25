@@ -187,3 +187,20 @@ TRACKED_FIELDS = [
     "status", "current_assigned_to", "current_location", "brand",
     "model_number", "serial_number",
 ]
+
+
+class ExportPassword(models.Model):
+    """Single-row setting: the password the downloaded Excel export is locked
+    with (and that Import uses to unlock an exported file). Only the Super
+    Admin can set/reset it. Stored encrypted (see excel_security), never as
+    plain text, and never shown back on screen."""
+
+    encrypted_value = models.TextField()
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+
+    def __str__(self):
+        return "Excel export password"

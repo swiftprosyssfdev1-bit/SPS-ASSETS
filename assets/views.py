@@ -8,7 +8,7 @@ from django.contrib.auth.views import LoginView
 from django.core.exceptions import PermissionDenied
 from django.db import transaction, IntegrityError
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -16,19 +16,26 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from django.contrib.auth import update_session_auth_hash
+
 from .forms import (
     AssetForm, AssetCategoryForm, BranchForm, BranchAdminCreateForm, BranchAdminEditForm,
+    AccountSettingsForm,
 )
 from .models import Asset, AssetCategory, AssetHistory, Branch, UserBranchAccess
 from .category_fields import (
     get_category_fields, is_employee_category, EMPLOYEE_MAIN_COLUMNS,
-    workstation_lookup_category, get_common_fields,
+    workstation_lookup_category, get_common_fields, status_driver_column,
 )
 from .sheet_templates import get_template_for_category
 from .import_utils import (
     IMPORT_COLUMNS, ImportFileError, parse_uploaded_file, validate_rows,
     parse_uploaded_workbook_sheets, validate_workbook_sheets,
     serialize_for_session, deserialize_from_session, _normalize_header,
+    read_upload_bytes,
+)
+from .excel_security import (
+    get_export_password, encrypt_xlsx_bytes, set_export_password, export_password_status,
 )
 from .permissions import (
     is_super_admin, is_branch_admin, super_admin_required, admin_required,
@@ -333,34 +340,53 @@ def _list_summary_field(category, category_fields):
 # out of the dashboard's "Total Active Assets" and status cards.
 NON_ASSET_CATEGORIES = {"it vendor", "incident register", "employee", "employee list"}
 
-# Employees are people: their form only shows Employee Name / Employee ID /
-# Status (no brand, model, serial, location, purchase date ...).
-EMPLOYEE_STATUS_CHOICES = [("active", "Active"), ("inactive", "Inactive"), ("other", "Other")]
+# Status values that make sense for each category. The Status dropdown on the
+# Add/Edit form only lists these (and the form JS swaps the list when the
+# Category dropdown changes). Any category not listed here is a physical
+# hardware asset and gets HARDWARE_STATUS_VALUES.
+HARDWARE_STATUS_VALUES = ["working", "not_working", "idle", "scrap", "missing", "service"]
+STATUS_VALUES_BY_CATEGORY = {
+    # Employees are people, projects are work, incidents are tickets —
+    # none of them are "Working / Not Working" hardware.
+    "employee": ["active", "inactive", "other"],
+    "employee list": ["active", "inactive", "other"],
+    "project details": ["active", "completed", "stopped"],
+    "incident register": ["open", "resolved"],
+    "air conditioner": ["working", "not_working", "service", "scrap"],
+}
 
-# Project Details records aren't physical assets — their Status column just
-# tracks whether the project is Active, Completed, or Stopped.
-PROJECT_STATUS_CHOICES = [("active", "Active"), ("completed", "Completed"), ("stopped", "Stopped")]
+
+def _status_choices_for(category_name):
+    """[(value, label), ...] of the statuses allowed for a category."""
+    key = (category_name or "").strip().lower()
+    labels = dict(Asset.STATUS_CHOICES)
+    values = STATUS_VALUES_BY_CATEGORY.get(key, HARDWARE_STATUS_VALUES)
+    return [(v, labels[v]) for v in values]
 
 
-def _employee_form_setup(form, instance=None):
-    """Limit the Status dropdown to people-appropriate values (keeping the
-    record's current value so editing never silently changes it)."""
-    choices = list(EMPLOYEE_STATUS_CHOICES)
+def _status_form_setup(form, category=None, instance=None):
+    """Limit the Status dropdown to the statuses that suit this category.
+
+    `instance` (edit only) is the record as currently saved: if its status is
+    a legacy value outside the allowed list (e.g. "other" from an old import)
+    it is kept as an extra option so editing never silently changes it —
+    except Project Details records left on the old "working"/"running"
+    import default, which just show as Active.
+    """
+    cat_name = getattr(category, "name", category) or ""
+    key = cat_name.strip().lower()
+    choices = _status_choices_for(cat_name)
+    allowed = dict(choices)
     current = getattr(instance, "status", None)
-    if current and current not in dict(choices):
+    same_category = instance is not None and getattr(category, "pk", None) == instance.category_id
+
+    if key == "project details" and current in ("working", "running"):
+        form.initial["status"] = "active"
+    elif current and same_category and current not in allowed:
         choices.append((current, dict(Asset.STATUS_CHOICES).get(current, current)))
     form.fields["status"].choices = choices
-
-
-def _project_form_setup(form, instance=None):
-    """Limit the Status dropdown to Active / Completed / Stopped for Project
-    Details records (keeping the record's current value so editing never
-    silently changes it)."""
-    choices = list(PROJECT_STATUS_CHOICES)
-    current = getattr(instance, "status", None)
-    if current and current not in dict(choices):
-        choices.append((current, dict(Asset.STATUS_CHOICES).get(current, current)))
-    form.fields["status"].choices = choices
+    if instance is None:
+        form.initial.setdefault("status", choices[0][0])
 
 
 def _sync_employee_extra_details(asset, extra, old_status=None):
@@ -380,6 +406,44 @@ def _sync_employee_extra_details(asset, extra, old_status=None):
     return extra
 
 
+def _sync_status_column(asset, extra, old_status=None):
+    """Keep the sheet's own Status/Condition column (the one the Status
+    dropdown replaces on the form) in step with the real status, so the
+    detail page and Excel export match. The original wording (e.g. "working
+    but no stand") is kept unless the status was actually changed."""
+    driver = status_driver_column(asset.category)
+    if not driver:
+        return extra
+    for f in get_category_fields(asset.category):
+        if _normalize_header(f["label"]) == driver:
+            if not extra.get(f["name"]) or old_status != asset.status:
+                extra[f["name"]] = asset.get_status_display()
+    return extra
+
+
+def _sync_project_details(asset, extra):
+    """Project Details: the project name is the asset tag, so Name (used in
+    search / history / titles) and the sheet's "Project Name" column follow
+    it instead of the auto-filler "Project Details <tag>"."""
+    if (asset.category.name or "").strip().lower() != "project details":
+        return extra
+    asset.name = asset.asset_tag
+    for f in get_category_fields(asset.category):
+        if _normalize_header(f["label"]) == "project name":
+            extra[f["name"]] = asset.asset_tag
+    return extra
+
+
+def order_branch_wise(qs):
+    """Records grouped branch by branch — all of the first branch's, then the
+    next branch's, and so on (branches in the order they were created:
+    Chennai, Tindivanam, ...) — with no-branch records last, and by asset tag
+    inside each branch. Used by the category list pages and the Excel export,
+    so both show the same order. With a single branch selected it's just
+    tag order."""
+    return qs.order_by(F("branch_id").asc(nulls_last=True), "asset_tag")
+
+
 @login_required
 def category_detail(request, category_id):
     category = get_object_or_404(AssetCategory, pk=category_id)
@@ -390,7 +454,7 @@ def category_detail(request, category_id):
         assets, selected_branch, accessible_branches,
         include_unassigned=is_super_admin(request.user) and selected_branch is None,
     )
-    assets = assets.order_by("asset_tag")
+    assets = order_branch_wise(assets)
 
     cat_norm = category.name.strip().lower()
     is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
@@ -464,6 +528,12 @@ def _build_category_form_config():
         template_key = CATEGORY_TO_TEMPLATE.get(cat_norm)
         overrides = SHEET_HEADER_OVERRIDES.get(template_key, {})
 
+        driver = status_driver_column(cat)
+        status_label = "Status"
+        if driver:
+            for f in get_category_fields(cat):
+                if _normalize_header(f["label"]) == driver:
+                    status_label = f["label"]
         extra_fields = []
         if cat_norm not in ("employee", "employee list", "project details", "other asset", "laptop", "networking equipment"):
             for f in get_category_fields(cat):
@@ -478,9 +548,13 @@ def _build_category_form_config():
                     continue
                 if norm in ("asset tag", "name", "notes", "active", "is active", "category", "branch"):
                     continue
-                if mapped in common_fields:
+                if mapped in common_fields and not (driver and mapped == "status"):
                     continue
-                if norm in ("status", "current status") and "status" in common_fields:
+                if driver:
+                    # this column is replaced by the real Status dropdown
+                    if norm == driver:
+                        continue
+                elif norm in ("status", "current status") and "status" in common_fields:
                     continue
                 if norm in ("brand",) and "brand" in common_fields:
                     continue
@@ -507,8 +581,12 @@ def _build_category_form_config():
                     entry["lookup_category"] = lookup
                 extra_fields.append(entry)
 
+        status_choices = _status_choices_for(cat.name)
         config[str(cat.pk)] = {
             "name": cat.name,
+            "status_choices": status_choices,
+            "status_default": status_choices[0][0],
+            "status_label": status_label,
             "common_fields": common_fields,
             "extra_fields": extra_fields,
             "employee_form": employee_form,
@@ -550,10 +628,7 @@ def asset_create(request):
 
     if request.method == "POST":
         form = AssetForm(request.POST, accessible_branches=accessible_branches)
-        if employee_form:
-            _employee_form_setup(form)
-        elif project_form:
-            _project_form_setup(form)
+        _status_form_setup(form, category)
         if form.is_valid():
             asset = form.save(commit=False)
             asset.updated_by = request.user
@@ -565,17 +640,15 @@ def asset_create(request):
             asset.extra_details = _extract_extra_details(request, asset.category)
             if employee_form:
                 asset.extra_details = _sync_employee_extra_details(asset, asset.extra_details)
+            else:
+                asset.extra_details = _sync_status_column(asset, asset.extra_details)
+            asset.extra_details = _sync_project_details(asset, asset.extra_details)
             asset.save()
             messages.success(request, f"Asset {asset.asset_tag} added.")
             return redirect("assets:category_detail", category_id=asset.category_id)
     else:
         form = AssetForm(initial=initial, accessible_branches=accessible_branches)
-        if employee_form:
-            _employee_form_setup(form)
-            form.initial.setdefault("status", "active")
-        elif project_form:
-            _project_form_setup(form)
-            form.initial.setdefault("status", "active")
+        _status_form_setup(form, category)
 
     return render(request, "assets/asset_form.html", {
         "form": form, "title": f"Add {category.name}" if category else "Add Asset",
@@ -603,10 +676,8 @@ def asset_update(request, asset_id):
 
     if request.method == "POST":
         form = AssetForm(request.POST, instance=asset, accessible_branches=accessible_branches)
-        if employee_form:
-            _employee_form_setup(form, instance=Asset.objects.get(pk=asset.pk))
-        elif project_form:
-            _project_form_setup(form, instance=Asset.objects.get(pk=asset.pk))
+        posted_category = AssetCategory.objects.filter(pk=request.POST.get("category") or None).first()
+        _status_form_setup(form, posted_category or asset.category, instance=Asset.objects.get(pk=asset.pk))
         if form.is_valid():
             updated = form.save(commit=False)
             require_branch_access(request.user, updated.branch)
@@ -623,15 +694,15 @@ def asset_update(request, asset_id):
                 merged = dict(Asset.objects.get(pk=asset.pk).extra_details or {})
                 merged.update({k: v for k, v in updated.extra_details.items() if v != ""})
                 updated.extra_details = _sync_employee_extra_details(updated, merged, old_status)
+            else:
+                updated.extra_details = _sync_status_column(updated, updated.extra_details, old_status)
+            updated.extra_details = _sync_project_details(updated, updated.extra_details)
             updated.save()
             messages.success(request, f"Asset {updated.asset_tag} updated.")
             return redirect("assets:category_detail", category_id=updated.category_id)
     else:
         form = AssetForm(instance=asset, accessible_branches=accessible_branches)
-        if employee_form:
-            _employee_form_setup(form, instance=asset)
-        elif project_form:
-            _project_form_setup(form, instance=asset)
+        _status_form_setup(form, asset.category, instance=asset)
 
     return render(request, "assets/asset_form.html", {
         "form": form, "title": f"Edit Asset — {asset.asset_tag}", "asset": asset,
@@ -706,8 +777,15 @@ def asset_detail(request, asset_id):
         ]
     else:
         category_fields = get_category_fields(asset.category)
+        driver = status_driver_column(asset.category)
         detail_fields = [
-            {"label": f["label"], "value": asset.extra_details.get(f["name"], "")}
+            {
+                "label": f["label"],
+                # the Status/Condition column shows the real status, not the
+                # (possibly empty / stale) imported text copy
+                "value": asset.get_status_display() if driver and _normalize_header(f["label"]) == driver
+                         else asset.extra_details.get(f["name"], ""),
+            }
             for f in category_fields
         ]
     is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
@@ -919,6 +997,42 @@ def admin_update(request, user_id):
     })
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Self-service account settings (any logged-in user, including Super Admin)
+# ─────────────────────────────────────────────────────────────────────────
+
+@login_required
+@superuser_required
+def account_settings(request):
+    """Lets the Super Admin change their own username, email, and/or login
+    password. `admin_update` deliberately excludes superusers, so this is
+    the only place they can do this for themselves. Branch Admins don't
+    get this page — their username/password is managed by the Super Admin
+    via `admin_update`."""
+    user = request.user
+
+    if request.method == "POST":
+        form = AccountSettingsForm(request.POST, user=user)
+        if form.is_valid():
+            user.username = form.cleaned_data["username"]
+            user.email = form.cleaned_data["email"]
+            new_password = form.cleaned_data["new_password"]
+            if new_password:
+                user.set_password(new_password)
+            user.save()
+            if new_password:
+                # Keep the current session logged in after a password change.
+                update_session_auth_hash(request, user)
+            messages.success(request, "Account settings updated.")
+            return redirect("assets:account_settings")
+    else:
+        form = AccountSettingsForm(user=user, initial={
+            "username": user.username,
+            "email": user.email,
+        })
+    return render(request, "assets/account_settings.html", {"form": form})
+
+
 EXPORT_COLUMNS = [
     ("Asset Tag", "asset_tag"),
     ("Name", "name"),
@@ -1008,6 +1122,17 @@ def _safe_sheet_name(name, used_names):
 
 @login_required
 def export_assets(request):
+    # The download is always password-protected. If no password is set up,
+    # stop here rather than hand out an open file.
+    export_password = get_export_password()
+    if not export_password:
+        messages.error(
+            request,
+            "Export is disabled: no Excel password has been set. "
+            "The Super Admin can set one under Manage → Export Password.",
+        )
+        return redirect("assets:dashboard")
+
     selected_branch, accessible_branches = resolve_selected_branch(request)
 
     wb = Workbook()
@@ -1025,7 +1150,11 @@ def export_assets(request):
             assets, selected_branch, accessible_branches,
             include_unassigned=is_super_admin(request.user) and selected_branch is None,
         )
-        assets = assets.order_by("asset_tag")
+        # Branch-wise: all of the first branch's records, then the next
+        # branch's, and so on (branches in the order they were created —
+        # Chennai, Tindivanam, ...); records with no branch last. Inside a
+        # branch, by asset tag.
+        assets = list(order_branch_wise(assets.select_related("branch")))
         sheet_name = _safe_sheet_name(category.name, used_names)
         ws = wb.create_sheet(title=sheet_name)
 
@@ -1144,6 +1273,16 @@ def export_assets(request):
                 headers = [h for i, h in enumerate(headers) if keep_cols[i]]
                 data_rows = [[v for i, v in enumerate(row) if keep_cols[i]] for row in data_rows]
 
+        # Branch column (last) so it's clear which branch each row belongs
+        # to when several branches are in one file. Import ignores it (the
+        # branch is still chosen on the import screen).
+        if "branch" not in {str(h).strip().lower() for h in headers}:
+            headers = list(headers) + ["Branch"]
+            data_rows = [
+                list(row) + [a.branch.name if a.branch else ""]
+                for row, a in zip(data_rows, assets)
+            ]
+
         ws.append(headers)
         for col_idx in range(1, len(headers) + 1):
             cell = ws.cell(row=1, column=col_idx)
@@ -1166,14 +1305,36 @@ def export_assets(request):
 
     buffer = BytesIO()
     wb.save(buffer)
-    buffer.seek(0)
+    encrypted = encrypt_xlsx_bytes(buffer.getvalue(), export_password)
 
     response = HttpResponse(
-        buffer.read(),
+        encrypted,
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = 'attachment; filename="Swift_ProSys_Asset_Register.xlsx"'
     return response
+
+
+@login_required
+@superuser_required
+def export_password_settings(request):
+    """Super Admin only: set or reset the password on downloaded Excel
+    exports. The current password is never displayed."""
+    from .forms import ExportPasswordForm
+
+    if request.method == "POST":
+        form = ExportPasswordForm(request.POST)
+        if form.is_valid():
+            set_export_password(form.cleaned_data["password1"], user=request.user)
+            messages.success(request, "Excel export password updated.")
+            return redirect("assets:export_password")
+    else:
+        form = ExportPasswordForm()
+    is_set, source, updated_at, updated_by = export_password_status()
+    return render(request, "assets/export_password.html", {
+        "form": form, "is_set": is_set, "source": source,
+        "updated_at": updated_at, "updated_by": updated_by,
+    })
 
 
 SESSION_IMPORT_KEY = "bulk_import_rows"
@@ -1250,7 +1411,7 @@ def bulk_import(request):
                 # instead of failing with "Missing required column:
                 # Category".
                 try:
-                    probe_wb = load_workbook(filename=BytesIO(uploaded_file.read()), read_only=True)
+                    probe_wb = load_workbook(filename=BytesIO(read_upload_bytes(uploaded_file)), read_only=True)
                     if len(probe_wb.sheetnames) > 1:
                         is_multi_sheet = True
                     else:

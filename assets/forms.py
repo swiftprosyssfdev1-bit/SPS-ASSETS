@@ -154,3 +154,86 @@ class BranchAdminEditForm(forms.Form):
         if existing.exists():
             raise forms.ValidationError("A user with this username already exists.")
         return username
+
+
+class AccountSettingsForm(forms.Form):
+    """Super Admin only: change their own username, email, and/or login
+    password. Changing either the username or the password requires
+    confirming the current password."""
+    username = forms.CharField(
+        max_length=150, label="Username",
+        widget=forms.TextInput(attrs={"class": "form-control", "autocomplete": "username"}),
+    )
+    email = forms.EmailField(
+        required=False, label="Email",
+        widget=forms.EmailInput(attrs={"class": "form-control"}),
+    )
+    new_password = forms.CharField(
+        required=False, label="New password (leave blank to keep current)",
+        widget=forms.PasswordInput(attrs={"class": "form-control", "autocomplete": "new-password"}),
+        min_length=8,
+    )
+    confirm_new_password = forms.CharField(
+        required=False, label="Confirm new password",
+        widget=forms.PasswordInput(attrs={"class": "form-control", "autocomplete": "new-password"}),
+    )
+    current_password = forms.CharField(
+        required=False, label="Current password",
+        widget=forms.PasswordInput(attrs={"class": "form-control", "autocomplete": "current-password"}),
+        help_text="Required to change your username or set a new password.",
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self._user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_username(self):
+        username = self.cleaned_data["username"].strip()
+        existing = User.objects.filter(username__iexact=username)
+        if self._user is not None:
+            existing = existing.exclude(pk=self._user.pk)
+        if existing.exists():
+            raise forms.ValidationError("A user with this username already exists.")
+        return username
+
+    def clean(self):
+        cleaned = super().clean()
+        new_password = cleaned.get("new_password")
+        confirm_password = cleaned.get("confirm_new_password")
+        current_password = cleaned.get("current_password")
+        username_changed = (
+            self._user is not None
+            and cleaned.get("username")
+            and cleaned["username"] != self._user.username
+        )
+
+        if new_password or confirm_password:
+            if new_password != confirm_password:
+                self.add_error("confirm_new_password", "The two passwords don't match.")
+
+        if (new_password or username_changed) and not current_password:
+            self.add_error("current_password", "Enter your current password to confirm this change.")
+        elif current_password and self._user is not None and not self._user.check_password(current_password):
+            self.add_error("current_password", "Current password is incorrect.")
+
+        return cleaned
+
+
+class ExportPasswordForm(forms.Form):
+    """Super Admin: set or reset the password that locks Excel exports."""
+    password1 = forms.CharField(
+        label="New password", min_length=8,
+        widget=forms.PasswordInput(attrs={"class": "form-control", "autocomplete": "new-password"}),
+        help_text="At least 8 characters.",
+    )
+    password2 = forms.CharField(
+        label="Confirm new password",
+        widget=forms.PasswordInput(attrs={"class": "form-control", "autocomplete": "new-password"}),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        p1, p2 = cleaned.get("password1"), cleaned.get("password2")
+        if p1 and p2 and p1 != p2:
+            self.add_error("password2", "The two passwords don't match.")
+        return cleaned
