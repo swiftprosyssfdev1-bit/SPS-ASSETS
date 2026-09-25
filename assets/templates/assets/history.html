@@ -32,7 +32,7 @@
             <select name="field" class="form-select">
                 <option value="">All fields</option>
                 {% for f in fields %}
-                <option value="{{ f }}" {% if field == f %}selected{% endif %}>{{ f|cut:"_"|capfirst }}</option>
+                <option value="{{ f }}" {% if field == f %}selected{% endif %}>{% if f == "is_active" %}Active status{% else %}{{ f|cut:"_"|capfirst }}{% endif %}</option>
                 {% endfor %}
             </select>
         </div>
@@ -59,16 +59,34 @@
             </thead>
             <tbody>
                 {% for h in page %}
-                <tr>
+                <tr{% if h.field_name == "is_active" and h.new_value == "False" %} class="table-danger"{% endif %}>
                     <td>
                         <a href="{% url 'assets:asset_update' h.asset_id %}" class="text-decoration-none">
                             {{ h.asset.name }}
                         </a>
+                        <div class="text-muted small">{{ h.asset.asset_tag }}</div>
                     </td>
                     <td class="text-muted">{{ h.asset.category.name }}</td>
-                    <td class="text-capitalize">{{ h.field_name|cut:"_" }}</td>
-                    <td class="text-muted">{{ h.old_value|default:"—" }}</td>
-                    <td class="fw-semibold">{{ h.new_value|default:"—" }}</td>
+                    <td class="text-capitalize">
+                        {% if h.field_name == "is_active" %}
+                            Active status
+                        {% else %}
+                            {{ h.field_name|cut:"_" }}
+                        {% endif %}
+                    </td>
+                    {% if h.field_name == "is_active" %}
+                        <td class="text-muted">{% if h.old_value == "True" %}Active{% else %}Deactivated{% endif %}</td>
+                        <td class="fw-semibold">
+                            {% if h.new_value == "False" %}
+                                <span class="badge bg-danger">Deactivated</span>
+                            {% else %}
+                                <span class="badge bg-success">Reactivated</span>
+                            {% endif %}
+                        </td>
+                    {% else %}
+                        <td class="text-muted">{{ h.old_value|default:"—" }}</td>
+                        <td class="fw-semibold">{{ h.new_value|default:"—" }}</td>
+                    {% endif %}
                     <td>{{ h.changed_by|default:"—" }}</td>
                     <td class="text-muted small">{{ h.changed_at }}</td>
                 </tr>

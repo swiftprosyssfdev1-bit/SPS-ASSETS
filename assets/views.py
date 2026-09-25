@@ -8,7 +8,7 @@ from django.contrib.auth.views import LoginView
 from django.core.exceptions import PermissionDenied
 from django.db import transaction, IntegrityError
 from django.core.paginator import Paginator
-from django.db.models import Count, F, Q
+from django.db.models import Count, F, Q, Prefetch
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -224,10 +224,14 @@ def dashboard(request):
         .annotate(count=Count("id"))
         .order_by("-count")
     )
+    branch_scoped_all = filter_assets_to_branch(
+        Asset.objects.all(), selected_branch, accessible_branches,
+        include_unassigned=is_super_admin(request.user) and selected_branch is None,
+    )
     recent_changes = (
         AssetHistory.objects
         .select_related("asset", "changed_by", "asset__branch")
-        .filter(asset__in=branch_scoped)
+        .filter(asset__in=branch_scoped_all)
         # Dashboard is a clean, at-a-glance summary — leave out entries for
         # assets whose tag was auto-suffixed to dodge a collision during
         # import (e.g. "7" and "7-2" from two stacked vendor lists in one
@@ -627,7 +631,7 @@ def asset_create(request):
     is_info_register = cat_key in INFO_REGISTER_CATEGORIES
 
     if request.method == "POST":
-        form = AssetForm(request.POST, accessible_branches=accessible_branches)
+        form = AssetForm(request.POST, accessible_branches=accessible_branches, user=request.user)
         _status_form_setup(form, category)
         if form.is_valid():
             asset = form.save(commit=False)
@@ -647,7 +651,7 @@ def asset_create(request):
             messages.success(request, f"Asset {asset.asset_tag} added.")
             return redirect("assets:category_detail", category_id=asset.category_id)
     else:
-        form = AssetForm(initial=initial, accessible_branches=accessible_branches)
+        form = AssetForm(initial=initial, accessible_branches=accessible_branches, user=request.user)
         _status_form_setup(form, category)
 
     return render(request, "assets/asset_form.html", {
@@ -675,7 +679,7 @@ def asset_update(request, asset_id):
     old_status = asset.status
 
     if request.method == "POST":
-        form = AssetForm(request.POST, instance=asset, accessible_branches=accessible_branches)
+        form = AssetForm(request.POST, instance=asset, accessible_branches=accessible_branches, user=request.user)
         posted_category = AssetCategory.objects.filter(pk=request.POST.get("category") or None).first()
         _status_form_setup(form, posted_category or asset.category, instance=Asset.objects.get(pk=asset.pk))
         if form.is_valid():
@@ -701,7 +705,7 @@ def asset_update(request, asset_id):
             messages.success(request, f"Asset {updated.asset_tag} updated.")
             return redirect("assets:category_detail", category_id=updated.category_id)
     else:
-        form = AssetForm(instance=asset, accessible_branches=accessible_branches)
+        form = AssetForm(instance=asset, accessible_branches=accessible_branches, user=request.user)
         _status_form_setup(form, asset.category, instance=asset)
 
     return render(request, "assets/asset_form.html", {
@@ -1031,6 +1035,49 @@ def account_settings(request):
             "email": user.email,
         })
     return render(request, "assets/account_settings.html", {"form": form})
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Deactivated Assets (Super Admin only — see and undo a deactivation)
+# ─────────────────────────────────────────────────────────────────────────
+
+@login_required
+@superuser_required
+def deactivated_assets(request):
+    """Lists every asset with is_active=False, with who deactivated it and
+    when (from AssetHistory), so the Super Admin can find and reactivate
+    one without needing DB/admin-panel access."""
+    last_deactivation = Prefetch(
+        "history",
+        queryset=AssetHistory.objects.filter(
+            field_name="is_active", new_value="False"
+        ).select_related("changed_by").order_by("-changed_at", "-id"),
+        to_attr="deactivation_entries",
+    )
+    assets = (
+        Asset.objects.filter(is_active=False)
+        .select_related("category", "branch")
+        .prefetch_related(last_deactivation)
+        .order_by("-updated_at")
+    )
+    return render(request, "assets/deactivated_assets.html", {"assets": assets})
+
+
+@login_required
+@superuser_required
+def asset_reactivate(request, asset_id):
+    """Super Admin only: flip a deactivated asset back to active. Separate
+    from asset_update so this stays a one-click action from the
+    Deactivated Assets list (the Edit-form checkbox is also available and
+    goes through the same superuser check)."""
+    asset = get_object_or_404(Asset, pk=asset_id, is_active=False)
+    if request.method == "POST":
+        asset.is_active = True
+        asset.updated_by = request.user
+        asset.save()
+        messages.success(request, f"Asset {asset.asset_tag} reactivated.")
+        return redirect("assets:deactivated_assets")
+    return redirect("assets:deactivated_assets")
 
 
 EXPORT_COLUMNS = [

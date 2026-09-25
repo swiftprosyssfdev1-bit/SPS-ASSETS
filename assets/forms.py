@@ -32,12 +32,18 @@ class AssetForm(forms.ModelForm):
             "is_active": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
 
-    def __init__(self, *args, accessible_branches=None, **kwargs):
+    def __init__(self, *args, accessible_branches=None, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         if accessible_branches is not None:
             self.fields["branch"].queryset = accessible_branches
         self.fields["branch"].required = True
         self.fields["name"].required = False
+        self._user = user
+        # Only the Super Admin may flip a deactivated asset back to active;
+        # everyone else keeps the field read-only when it's already off.
+        editing_inactive_asset = self.instance.pk and not self.instance.is_active
+        if editing_inactive_asset and not (user is not None and user.is_superuser):
+            self.fields["is_active"].disabled = True
 
     def clean(self):
         cleaned_data = super().clean()
@@ -55,6 +61,11 @@ class AssetForm(forms.ModelForm):
                 cleaned_data["name"] = f"{category.name}"
             else:
                 cleaned_data["name"] = "Asset"
+
+        was_inactive = self.instance.pk and not self.instance.is_active
+        is_superuser = bool(self._user is not None and self._user.is_superuser)
+        if was_inactive and cleaned_data.get("is_active") and not is_superuser:
+            self.add_error("is_active", "Only the Super Admin can reactivate a deactivated asset.")
         return cleaned_data
 
     def clean_branch(self):

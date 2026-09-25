@@ -87,6 +87,10 @@
             <div class="col-12 form-check ms-1">
                 {{ form.is_active }}
                 <label class="form-check-label" for="{{ form.is_active.id_for_label }}">Active</label>
+                {% if form.is_active.field.disabled %}
+                <div class="form-text">This asset is deactivated. Only the Super Admin can reactivate it.</div>
+                {% endif %}
+                {{ form.is_active.errors }}
             </div>
         </div>
 

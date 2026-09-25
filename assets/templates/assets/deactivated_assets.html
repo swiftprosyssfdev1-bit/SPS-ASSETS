@@ -1,0 +1,54 @@
+{% extends "assets/base.html" %}
+{% block title %}Deactivated Assets - Asset Register{% endblock %}
+{% block content %}
+
+<div class="mb-4">
+    <a href="{% url 'assets:dashboard' %}" class="btn-back">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+    </a>
+    <h3 class="fw-bold text-secondary mt-1 mb-0">Deactivated Assets</h3>
+    <div class="text-muted small">{{ assets|length }} asset{{ assets|length|pluralize }} currently deactivated.</div>
+</div>
+
+<div class="card card-stat">
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Asset</th>
+                    <th>Category</th>
+                    <th>Branch</th>
+                    <th>Deactivated By</th>
+                    <th>When</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in assets %}
+                <tr>
+                    <td>
+                        <a href="{% url 'assets:asset_update' asset.id %}" class="text-decoration-none">{{ asset.name }}</a>
+                        <div class="text-muted small">{{ asset.asset_tag }}</div>
+                    </td>
+                    <td class="text-muted">{{ asset.category.name }}</td>
+                    <td class="text-muted">{{ asset.branch.name|default:"—" }}</td>
+                    {% with entry=asset.deactivation_entries.0 %}
+                    <td>{% if entry %}{{ entry.changed_by|default:"—" }}{% else %}—{% endif %}</td>
+                    <td class="text-muted small">{% if entry %}{{ entry.changed_at }}{% else %}{{ asset.updated_at }}{% endif %}</td>
+                    {% endwith %}
+                    <td class="text-end">
+                        <form method="post" action="{% url 'assets:asset_reactivate' asset.id %}" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-swift">Reactivate</button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-muted text-center py-4">No deactivated assets.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

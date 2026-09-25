@@ -185,7 +185,7 @@ class AssetHistory(models.Model):
 
 TRACKED_FIELDS = [
     "status", "current_assigned_to", "current_location", "brand",
-    "model_number", "serial_number",
+    "model_number", "serial_number", "is_active",
 ]
 
 
