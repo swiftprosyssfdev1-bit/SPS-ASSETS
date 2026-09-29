@@ -277,28 +277,53 @@ def employee_repeat_keys_in_use(category):
     return used
 
 
+def is_category_db_configured(category):
+    """
+    Returns True if this category has been intentionally configured via the
+    Category Builder (i.e. ANY AssetField row exists for it, even inactive).
+    Once True, the hard-coded sheet_templates/CATEGORY_FIELDS fallbacks are
+    never used for this category — the DB is the sole source of truth.
+    """
+    if not category or not hasattr(category, "pk") or not category.pk:
+        return False
+    from .models import AssetField  # local import: avoids app-loading order issue
+    return AssetField.objects.filter(category=category).exists()
+
+
 def get_category_fields(category):
     """category: AssetCategory instance or category name string or None. Returns list of field dicts.
 
     Priority order:
-      1. This category's own sheet template (sheet_templates.py), if one is
+      1. DB AssetField rows — if ANY row exists for this category (even inactive),
+         the category is 'intentionally configured' and we only return ACTIVE DB
+         rows. No fallback to sheet_templates or CATEGORY_FIELDS is ever done
+         once a category enters the builder.
+      2. This category's own sheet template (sheet_templates.py), if one is
          registered — the EXACT original field names, in the EXACT original
-         order, from "system details updated 4.xlsx". This is what makes
-         the Add/Edit form and detail table for e.g. CPU / System Unit show
-         "System No, System Name, Password, OS Type, ..." rather than a
-         generic/common set of fields.
-      2. The REAL columns that exist in this category's data (so a bulk
-         import into a category with no registered template — Air
-         Conditioner, Biometric Device, etc. — still shows whatever columns
-         its source data really had).
-      3. The curated CATEGORY_FIELDS guesses below, only as a starting point
-         for a brand-new category with no assets yet and no template, so the
-         Add Asset form isn't empty.
+         order, from "system details updated 4.xlsx".
+      3. The REAL columns that exist in this category's data (so a bulk
+         import into a category with no registered template still shows
+         whatever columns its source data really had).
+      4. The curated CATEGORY_FIELDS guesses below, only as a starting point
+         for a brand-new category with no assets yet and no template.
     """
     if not category:
         return []
 
     cat_name = category.name if hasattr(category, "name") else str(category or "")
+
+    # Priority 1: DB-configured fields (category builder)
+    if hasattr(category, "pk") and category.pk:
+        from .models import AssetField  # local import
+        if AssetField.objects.filter(category=category).exists():
+            # Category is intentionally configured — only active fields, in order
+            active_fields = (
+                AssetField.objects.filter(category=category, is_active=True)
+                    .order_by("display_order", "id")
+            )
+            return [f.as_field_dict() for f in active_fields]
+
+    # Priority 2: sheet template (existing behaviour, unchanged)
     from .sheet_templates import get_template_for_category
     template = get_template_for_category(cat_name)
     if template:
@@ -317,15 +342,55 @@ def get_category_fields(category):
         if fields:
             return fields
 
+    # Priority 3: curated CATEGORY_FIELDS
     curated = CATEGORY_FIELDS.get(cat_name.strip().lower(), [])
     if curated:
         return [f for f in curated if not _is_sensitive_field(f["name"])]
 
+    # Priority 4: discover from existing data
     if hasattr(category, "pk"):
         discovered = _discover_fields_from_data(category)
         if discovered:
             return discovered
     return []
+
+
+def get_workstation_fields():
+    """Active WorkstationField rows as export/sample/form-ready field dicts,
+    in display order — the single source of truth for the Workstation
+    module's own columns (mirrors get_category_fields()'s DB-priority
+    branch, but Workstation has no AssetCategory-style fallback chain:
+    it is always and only configured through WorkstationField)."""
+    from .models import WorkstationField  # local import: avoids app-loading order issue
+
+    return [
+        f.as_field_dict()
+        for f in WorkstationField.objects.filter(is_active=True).order_by("display_order", "id")
+    ]
+
+
+def get_list_display_fields(category):
+    """The subset of get_category_fields(category) that should actually be
+    drawn as columns on the category's list page:
+
+    - Respects each field's show_in_list flag (DB-configured fields only;
+      legacy dicts from sheet templates / curated CATEGORY_FIELDS / data
+      discovery have no such flag, so they default to shown, matching
+      today's behaviour for them).
+    - Drops whichever field feeds Asset.status for this category (see
+      STATUS_DRIVER_COLUMN) since that value is already rendered as the
+      Status badge column — showing it again as a plain text column would
+      just duplicate it.
+    """
+    driver = status_driver_column(category)
+    fields = []
+    for f in get_category_fields(category):
+        if f.get("show_in_list", True) is False:
+            continue
+        if driver and _normalize_field_name(f.get("label", "")) == driver:
+            continue
+        fields.append(f)
+    return fields
 
 
 def _discover_fields_from_data(category):
@@ -355,3 +420,109 @@ def _discover_fields_from_data(category):
             seen.add(key)
             keys_in_order.append(key)
     return [{"name": k, "label": k, "type": "text"} for k in keys_in_order]
+
+
+# ---------------------------------------------------------------------------
+# Reading a category field's value off an asset
+# ---------------------------------------------------------------------------
+def _norm_key(text):
+    """'S.No' / 's_no' / 'S No' -> 'sno' (letters+digits only, lower-case)."""
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
+
+
+def resolve_extra_value(extra, field):
+    """Value of `field` inside an extra_details dict, tolerating old key
+    spellings: the exact key, the field's label, or any key that only differs
+    in case / spacing / punctuation ("S.No" vs "s_no"). Older rows were
+    imported under the sheet's header text before the Category Builder
+    re-keyed the fields, so their values sit under the old key."""
+    extra = extra or {}
+    name, label = field.get("name"), field.get("label")
+    for k in (name, label):
+        if k is not None and str(extra.get(k, "")).strip():
+            return extra[k]
+    targets = {_norm_key(name), _norm_key(label)} - {""}
+    for k, v in extra.items():
+        if _norm_key(k) in targets and str(v or "").strip():
+            return v
+    return ""
+
+
+def rekey_extra(category, extra):
+    """Copy of `extra` with old-keyed values moved onto the category's current
+    field keys, so Edit forms show them and saving doesn't leave a stale
+    duplicate behind. Never overwrites a value already on the current key."""
+    out = dict(extra or {})
+    fields = get_category_fields(category)
+    current_keys = {f.get("name") for f in fields}
+    for f in fields:
+        name = f.get("name")
+        if not name or str(out.get(name, "")).strip():
+            continue
+        targets = {_norm_key(name), _norm_key(f.get("label"))} - {""}
+        for k in list(out.keys()):
+            if k == name or k in current_keys or _norm_key(k) not in targets:
+                continue
+            if str(out[k] or "").strip():
+                out[name] = out.pop(k)
+                break
+    return out
+
+
+def resolve_field_value(asset, field):
+    """Value to show for `field` (a get_category_fields() dict) on `asset`:
+    extra_details (any old-key spelling) first, then the asset's own columns
+    for fields the category maps onto them (ID / name / brand / model /
+    serial / location / assigned-to), because rows created via the Add form
+    keep those on the asset itself."""
+    value = resolve_extra_value(getattr(asset, "extra_details", None), field)
+    if str(value or "").strip():
+        return value
+    # Workstation rows keep their own data on Workstation.extra_details
+    # (keyed by WorkstationField.key), not on Asset.extra_details — so the
+    # list page must look there too, or Employee ID / CPU etc. show as "—".
+    profile = getattr(asset, "workstation_profile", None)
+    if profile is not None:
+        wvalue = resolve_extra_value(getattr(profile, "extra_details", None), field)
+        if isinstance(wvalue, (list, tuple)):
+            wvalue = ", ".join(str(v) for v in wvalue if str(v or "").strip())
+        if str(wvalue or "").strip():
+            return wvalue
+    label = field.get("label")
+
+    lbl = _norm_key(label)
+    if not lbl:
+        return ""
+    cfg = get_category_field_labels(asset.category)
+
+    def is_(key):
+        return bool(cfg.get(key)) and _norm_key(cfg[key]) == lbl
+
+    if is_("tag_label"):
+        return asset.asset_tag or ""
+    if is_("name_label"):
+        # a "Brand" column is the asset's brand; the auto-generated name
+        # ("Mouse APPLE-2") is only a fallback
+        if lbl == "brand":
+            return asset.brand or asset.name or ""
+        return asset.name or ""
+    if is_("model_label"):
+        return asset.model_number or ""
+    if is_("serial_label"):
+        return asset.serial_number or ""
+    if is_("location_label"):
+        return asset.current_location or ""
+    if is_("assigned_label"):
+        return asset.current_assigned_to or ""
+
+    # Software / OS License has no label config: its unique ID column is
+    # "System No" (see import_utils.SHEET_TAG_COLUMN_HINTS).
+    cat_name = str(getattr(asset.category, "name", "") or "").strip().lower()
+    if cat_name.startswith("software") and lbl == "systemno":
+        return asset.asset_tag or ""
+    # Columns that are simply the asset's own date / notes fields.
+    if lbl == "lastservicedate" and asset.last_service_date:
+        return asset.last_service_date
+    if lbl == "notes":
+        return asset.notes or ""
+    return ""

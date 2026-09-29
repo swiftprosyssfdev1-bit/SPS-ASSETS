@@ -1,0 +1,20 @@
+{% extends "assets/base.html" %}
+{% block title %}Delete Category{% endblock %}
+{% block content %}
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 520px;">
+    <h5 class="text-secondary mb-3">Delete category "{{ category.name }}"?</h5>
+    {% if problem %}
+    <div class="alert alert-warning">{{ problem }}</div>
+    <a href="{% url 'assets:category_detail' category.id %}" class="btn btn-outline-secondary">Back</a>
+    {% else %}
+    <p class="text-muted">This permanently deletes the category and its field configuration. It has no asset records, so no asset data is lost. This can't be undone.</p>
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger">Yes, Delete</button>
+        <a href="{% url 'assets:category_detail' category.id %}" class="btn btn-outline-secondary">Cancel</a>
+    </form>
+    {% endif %}
+</div>
+
+{% endblock %}

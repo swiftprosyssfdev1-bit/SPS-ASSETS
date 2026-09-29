@@ -1,0 +1,43 @@
+{% extends "assets/base.html" %}
+{% load asset_extras %}
+{% block title %}Config Audit Log{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="fw-bold text-secondary">Configuration Audit Log</h3>
+    <a href="{% url 'assets:dashboard' %}" class="btn-back"><i class="bi bi-arrow-left"></i> Dashboard</a>
+</div>
+<div class="card card-stat">
+    <div class="card-body p-0">
+        {% if logs %}
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>When</th>
+                    <th>Who</th>
+                    <th>Action</th>
+                    <th>Model</th>
+                    <th>Object</th>
+                    <th>Changes</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td class="text-muted small text-nowrap">{{ log.changed_at|date:"d M Y H:i" }}</td>
+                    <td>{{ log.changed_by|default:"-" }}</td>
+                    <td>
+                        <span class="badge {% if log.action == 'create' %}bg-success{% elif log.action == 'update' %}bg-primary{% elif log.action == 'deactivate' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ log.action }}</span>
+                    </td>
+                    <td class="small text-muted">{{ log.model_name }}</td>
+                    <td class="small">{{ log.object_repr }}</td>
+                    <td class="small text-muted">{{ log.diff|format_config_diff }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center text-muted py-5"><i class="bi bi-journal-x" style="font-size:2rem;"></i><div class="mt-2">No config changes logged yet.</div></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

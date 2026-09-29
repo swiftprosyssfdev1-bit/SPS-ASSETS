@@ -1,6 +1,6 @@
 {% extends "assets/base.html" %}
 {% load asset_extras %}
-{% block title %}{{ category.name }} - Asset Register{% endblock %}
+{% block title %}{% if category.name|lower == "workstation" %}{{ ws_label }}{% else %}{{ category.name }}{% endif %} - Asset Register{% endblock %}
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -8,15 +8,44 @@
         <a href="{% url 'assets:dashboard' %}" class="btn-back">
             <i class="bi bi-arrow-left"></i> Back to Dashboard
         </a>
-        <h3 class="fw-bold text-secondary mt-1">{{ category.name }}</h3>
+        <h3 class="fw-bold text-secondary mt-1">{% if category.name|lower == "workstation" %}{{ ws_label }}{% else %}{{ category.name }}{% endif %}</h3>
         <div class="text-muted small">
             {% if selected_branch %}{{ selected_branch.name }} branch{% elif is_super_admin %}All branches{% endif %}
             — {{ assets|length }} record{{ assets|length|pluralize }}
         </div>
     </div>
-    <a href="{% url 'assets:asset_create' %}?category={{ category.id }}" class="btn btn-swift">
-        <i class="bi bi-plus-lg"></i> Add {% if is_info_register %}Record{% else %}Asset{% endif %}
-    </a>
+
+    <div class="d-flex gap-2">
+        {% if is_super_admin %}
+        {% if category.name|lower == "workstation" %}
+        <a href="{% url 'assets:workstation_builder' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-sliders me-1"></i> Field Builder
+        </a>
+        <a href="{% url 'assets:workstation_rename' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-pencil me-1"></i> Rename
+        </a>
+        {% else %}
+        <a href="{% url 'assets:category_builder' category.id %}" class="btn btn-outline-secondary">
+            <i class="bi bi-sliders me-1"></i> Field Builder
+        </a>
+        <a href="{% url 'assets:category_edit' category.id %}" class="btn btn-outline-secondary">
+            <i class="bi bi-pencil me-1"></i> Rename
+        </a>
+        <a href="{% url 'assets:category_delete' category.id %}" class="btn btn-outline-danger">
+            <i class="bi bi-trash me-1"></i> Delete
+        </a>
+        {% endif %}
+        {% endif %}
+        {% if category.name|lower == "workstation" %}
+        <a href="{% url 'assets:workstation_asset_add' %}" class="btn btn-swift">
+            <i class="bi bi-plus-lg"></i> Add {{ ws_label }}
+        </a>
+        {% else %}
+        <a href="{% url 'assets:asset_create' %}?category={{ category.id }}" class="btn btn-swift">
+            <i class="bi bi-plus-lg"></i> Add {% if is_info_register %}Record{% else %}Asset{% endif %}
+        </a>
+        {% endif %}
+    </div>
 </div>
 
 <div class="card card-stat">
@@ -73,6 +102,13 @@
                     {% if not hide_name %}<th>Name</th>{% endif %}
                     <th>Status</th>
                     {% if list_summary_field %}<th>{{ list_summary_field.label }}</th>{% endif %}
+                    {% elif has_dynamic_fields %}
+                    <th>{{ tag_label }}</th>
+                    {% if not hide_name %}<th>Name</th>{% endif %}
+                    {% for f in list_fields %}
+                    <th>{{ f.label }}</th>
+                    {% endfor %}
+                    <th>Status</th>
                     {% else %}
                     <th>{{ tag_label }}</th>
                     {% if not hide_name %}<th>Name</th>{% endif %}
@@ -92,7 +128,7 @@
                     {% if is_cupboard %}
                     <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
                     <td>
-                        {% with item_type=a.extra_details|get_item:"Item Type" %}
+                        {% with item_type=a.extra_details|xget:"Item Type" %}
                             {% if item_type == "Hard Disk" %}
                                 <span class="badge bg-primary-subtle text-primary border"><i class="bi bi-hdd me-1"></i>Hard Disk</span>
                             {% elif item_type == "RAM / Memory" or item_type == "RAM" %}
@@ -109,7 +145,7 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% with size_val=a.extra_details|get_item:"Size" cap_val=a.extra_details|get_item:"Capacity" %}
+                        {% with size_val=a.extra_details|xget:"Size" cap_val=a.extra_details|xget:"Capacity" %}
                             {{ size_val|default:cap_val|default:"—" }}
                         {% endwith %}
                     </td>
@@ -133,15 +169,15 @@
                     {% elif is_vendor %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
                     <td class="fw-semibold">{{ a.name }}</td>
-                    <td>{{ a.extra_details|get_item:"Types of Service"|default:"—" }}</td>
-                    <td>{{ a.extra_details|get_item:"Contact Person"|default:"—" }}</td>
-                    <td>{{ a.extra_details|get_item:"Mobile No"|default:"—" }}</td>
+                    <td>{{ a.extra_details|xget:"Types of Service"|default:"—" }}</td>
+                    <td>{{ a.extra_details|xget:"Contact Person"|default:"—" }}</td>
+                    <td>{{ a.extra_details|xget:"Mobile No"|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% elif is_employee %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
                     <td class="fw-semibold">{{ a.name }}</td>
                     <td>
-                        {% with emp_st=a.extra_details|get_item:"Status"|default:a.get_status_display %}
+                        {% with emp_st=a.extra_details|xget:"Status"|default:a.get_status_display %}
                             {% if emp_st == 'Active' or emp_st == 'active' %}
                                 <span class="badge badge-status-active">Active</span>
                             {% elif emp_st == 'Resigned' or emp_st == 'resigned' %}
@@ -157,10 +193,10 @@
                     </td>
                     {% elif is_incident %}
                     <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
-                    <td><span class="badge bg-light text-dark border">{{ a.extra_details|get_item:"Incident Type"|default:"Incident" }}</span></td>
-                    <td style="max-width: 320px;" class="text-wrap">{{ a.extra_details|get_item:"Incident Description"|default:"—" }}</td>
-                    <td class="text-nowrap small text-muted">{{ a.extra_details|get_item:"Start Date&Time"|default:"—" }}</td>
-                    <td class="text-nowrap small text-muted">{{ a.extra_details|get_item:"End Date&Time"|default:"—" }}</td>
+                    <td><span class="badge bg-light text-dark border">{{ a.extra_details|xget:"Incident Type"|default:"Incident" }}</span></td>
+                    <td style="max-width: 320px;" class="text-wrap">{{ a.extra_details|xget:"Incident Description"|default:"—" }}</td>
+                    <td class="text-nowrap small text-muted">{{ a.extra_details|xget:"Start Date&Time"|default:"—" }}</td>
+                    <td class="text-nowrap small text-muted">{{ a.extra_details|xget:"End Date&Time"|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% elif is_project_details %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
@@ -169,7 +205,7 @@
                     <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
                     <td class="fw-semibold">{{ a.name }}</td>
                     <td>
-                        {% with cap=a.extra_details|get_item:"capacity_location" legacy_cap=a.extra_details|get_item:"Status" %}
+                        {% with cap=a.extra_details|xget:"capacity_location" legacy_cap=a.extra_details|xget:"Status" %}
                             {{ cap|default:legacy_cap|default:a.current_location|default:"—" }}
                         {% endwith %}
                     </td>
@@ -181,7 +217,7 @@
                         {% endif %}
                     </td>
                     <td class="small text-muted">
-                        {% with det=a.extra_details|get_item:"Details" %}
+                        {% with det=a.extra_details|xget:"Details" %}
                             {{ a.last_service_date|default:det|default:"—" }}
                         {% endwith %}
                     </td>
@@ -191,7 +227,7 @@
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% if list_summary_field %}
                     <td>
-                        {% with summary_val=a.extra_details|get_item:list_summary_field.name %}
+                        {% with summary_val=a|field_value:list_summary_field %}
                             {% with resolved_asset=summary_val|resolve_asset %}
                                 {% if resolved_asset %}
                                 <a href="{% url 'assets:asset_detail' resolved_asset.id %}?back={{ request.get_full_path|urlencode:'' }}" class="badge bg-primary-subtle text-primary border text-decoration-none" title="View {{ resolved_asset.asset_tag }}">
@@ -207,7 +243,7 @@
                     {% elif is_hard_disk %}
                     <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
                     <td class="fw-semibold">{{ a.name }}</td>
-                    <td>{{ a.extra_details|get_item:"Size"|default:"—" }}</td>
+                    <td>{{ a.extra_details|xget:"Size"|default:"—" }}</td>
                     <td>
                         {% if a.serial_number %}
                         <code class="text-dark">{{ a.serial_number }}</code>
@@ -215,8 +251,8 @@
                         <span class="text-muted small">—</span>
                         {% endif %}
                     </td>
-                    <td class="small text-muted" style="max-width: 220px;">{{ a.extra_details|get_item:"Conditions"|default:"—" }}</td>
-                    <td class="small text-muted" style="max-width: 220px;">{{ a.extra_details|get_item:"Purpose"|default:"—" }}</td>
+                    <td class="small text-muted" style="max-width: 220px;">{{ a.extra_details|xget:"Conditions"|default:"—" }}</td>
+                    <td class="small text-muted" style="max-width: 220px;">{{ a.extra_details|xget:"Purpose"|default:"—" }}</td>
                     <td>
                         {% if a.status == 'not_set' %}
                         <span class="badge badge-status-not_set">Not Set</span>
@@ -225,10 +261,17 @@
                         {% endif %}
                     </td>
                     <td class="small text-muted" style="max-width: 240px;">
-                        {% with cs=a.extra_details|get_item:"Current Status" det=a.extra_details|get_item:"Details" %}
+                        {% with cs=a.extra_details|xget:"Current Status" det=a.extra_details|xget:"Details" %}
                             {{ cs|default:det|default:"—" }}
                         {% endwith %}
                     </td>
+                    {% elif has_dynamic_fields %}
+                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
+                    {% for f in list_fields %}
+                    <td>{{ a|field_value:f|default:"—" }}</td>
+                    {% endfor %}
+                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% else %}
                     <td class="fw-semibold">{{ a.asset_tag }}</td>
                     {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
@@ -268,8 +311,13 @@
                     </td>
                     {% endif %}
                     <td class="text-end">
+                        {% if category.name|lower == "workstation" %}
+                        <a href="{% url 'assets:workstation_asset_view' a.id %}" class="btn btn-sm btn-outline-secondary">View</a>
+                        <a href="{% url 'assets:workstation_asset_edit' a.id %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                        {% else %}
                         <a href="{% url 'assets:asset_detail' a.id %}?back={{ request.get_full_path|urlencode:'' }}" class="btn btn-sm btn-outline-secondary">View</a>
                         <a href="{% url 'assets:asset_update' a.id %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                        {% endif %}
                     </td>
                 </tr>
                 {% empty %}

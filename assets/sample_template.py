@@ -1,44 +1,52 @@
-SHEET_ORDER = [
-    'Air Conditioner',
-    'Biometric Device',
-    'Bluetooth Device',
-    'CPU - System Unit',
-    'Employee',
-    'Hard Disk',
-    'Incident Register',
-    'IT Vendor',
-    'Keyboard',
-    'Laptop',
-    'Monitor',
-    'Mouse',
-    'Networking Equipment',
-    'Other Asset',
-    'Project Backup',
-    'Project Details',
-    'Software - OS License',
-    'UPS',
-    'Workstation',
-]
+"""
+Sample / Import-Template workbook.
 
-SHEET_DATA = {
-    'Air Conditioner': [
+The workbook's SHAPE (which sheets exist, which columns each sheet has, in
+what order) is generated live from the database — AssetCategory + active
+AssetField rows for normal categories, active WorkstationField rows for the
+Workstation module — using the exact same resolvers forms and export use
+(assets.category_fields.get_category_fields / get_workstation_fields /
+get_common_fields). Add, rename, or deactivate a field anywhere in the
+Field Builder and the next download of this template reflects it
+immediately, with no code change here.
+
+SAMPLE_ROWS below is NOT the schema. It's optional cosmetic example data
+only, kept from the original "system details updated 4.xlsx" workbook for
+headers_only=False downloads. An example row is only ever used when its
+original header row still matches this category's CURRENT live headers
+exactly (case/space-insensitive) — the moment an admin changes that
+category's fields, the stale example rows are silently dropped and the
+sheet just ships with headers, instead of showing outdated example values.
+"""
+
+import re
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", str(s or "").lower()).strip()
+
+
+# Optional legacy example rows, keyed by category name (lowercased). First
+# row of each list is the ORIGINAL header row they were captured against —
+# used only to check the example is still valid for the category's current
+# live headers (see _norm comparison in build_sample_workbook below).
+SAMPLE_ROWS = {
+    'air conditioner': [
         ['Asset Tag', 'Name', 'Capacity / Location', 'Status', 'Serviced'],
         ['A/C001', 'Onida', '1.5 TON, ADMIN ROOM', 'Working', '2020-02-28'],
         ['A/C002', 'Onida', '1.5 TON, MIDDLE LEFT OF OFFICE', 'Working', '2020-02-28'],
-        ['A/C003(Rented)', 'Videocon', '1 TON, HEAD OFFICE ROOM', 'Working', '2020-02-28'],
     ],
-    'Biometric Device': [
+    'biometric device': [
         ['Asset Tag', 'Name', 'Status', 'Device Type', 'Details'],
         ['B001', 'ESSL', 'Working', 'Biometrics', 'BPO Office'],
         ['B002', 'ESSL', 'Working', 'Biometrics', 'BPO Office'],
     ],
-    'Bluetooth Device': [
+    'bluetooth device': [
         ['Bluetooth No', 'Devices', 'Brand', 'Remark', 'User Name'],
         ['BC001', 'Keyboard, Mouse and Bluetooth', 'logitech', 'in house', 'Bhavani'],
         ['BC002', 'Keyboard, Mouse and Bluetooth', 'logitech', 'Bluetooth connector not available', 'in Devaraj house'],
-        ['BC003', 'Keyboard, Mouse and Bluetooth', 'Raapoo', 'mouse not working', 'in Devaraj house'],
     ],
-    'CPU - System Unit': [
+    'cpu / system unit': [
         [
             'System No', 'System Name', 'Password', 'OS Type', 'Processor',
             'System Type', 'Motherboard Type', 'HardDisk Name', 'HardDisk Serial No.',
@@ -47,129 +55,188 @@ SHEET_DATA = {
             'Antivirus', 'Condition', 'Notes', 'others',
         ],
         [
-            '001', 'swiftserver', None, None, None, None, None, None, None, None,
-            None, None, 'Empty Chassis In Vinoth Place Cupboard', None, 'Empty',
-            'Empty Chassis - Idle',
-        ],
-        [
             '002', 'SPSW010002', '$w!ft@Pr0&ys', 'Win 7 Ultimate x64 bit(Pirated)',
             'Intel® Core™ i3 CPU 530 @ 2.93GHz', 'Intel Server Board S3420GPV', None,
             None, None, None, 'Transcend DDR3 2. (2.00 GB)=4GB', None,
-            'Display Problem(Idle)', None, 'working', 'Idle',
-        ],
-        [
-            '003', 'SPSW010003', None,
-            'Windows Server 2012 R2 Standarad x64 bit(Trail Version)',
-            'Intel Xeon(R) CPU E3-1220v2 @3.10 Ghz', 'Intel Server Board S3420GPV',
-            None, None, None, None, '6GB', None, None, None, 'working',
-            'Provided to Vicky Sir for Guindy Branch',
+            'Display Problem(Idle)', None, None, None, None, None, None, None,
+            'working', 'Idle',
         ],
     ],
-    'Employee': [
+    'employee': [
         ['EmployeeName', 'Employee Id', 'Status'],
         ['Subulakshmi', '1006', 'Active'],
-        ['Rajeswari K', 'EMPLOYEE-R116', 'Resigned'],
         ['Mohan Thass Shanmugam', 'SPS002', 'Active'],
     ],
-    'Hard Disk': [
+    'hard disk': [
         [
             'Hard disk  Number', 'Hard Disk Name', 'Size', 'Serial No',
             'Conditions', 'Purpose', 'Status', 'Current Status',
         ],
-        ['ANT Esports', 'Internal Harddisk', '240 SSD', '8906136070950', 'Recived From 16-05-2026 Amazon', None, 'Working', None],
         ['CL001', 'Samsung', '2TB', 'E2F2JJHF305', 'problem with the port frequently disconnecting', None, 'not working & inside the cupboard', 'In Cupboard'],
-        ['CL002', 'Toshiba', '500GB', '93FZT9TOTXR6', 'Given for service on 23052016 and came back not working so internal harddisk changed to 500gb original 2TB is in Waste storage', 'allocated for neps', 'working', 'Dhamu File Backup Working on Bpo Office in cupboard'],
     ],
-    'Incident Register': [
+    'incident register': [
         ['S.No', 'Incident Type', 'Incident Description', 'Start Date&Time', 'End Date&Time'],
-        ['1', 'Natutral disaster', 'Vardha Storm attack chennai and all network got disconnected', '2016-12-12 00:00:00', '2016-12-13 00:00:00'],
-        ['2', 'Network Disconnection', 'Airtel', '2015-12-14 00:00:00', '2015-12-14 00:00:00'],
-        ['3', 'Network Disconnection', 'ACT1 and ACT2 Disconnection due to vardha Strom because of optical disconnection', '2016-12-12 00:00:00', '2016-03-10 00:00:00'],
+        ['1', 'Natural disaster', 'Storm caused a network outage', '2016-12-12 00:00:00', '2016-12-13 00:00:00'],
     ],
-    'IT Vendor': [
+    'it vendor': [
         ['S.No', 'Vendor Name', 'Contact Person', 'Mobile No', 'Types of Service', 'Details 1', 'Details 2'],
-        ['1', 'Net4india', '044-2833510,044-2833530', '9840870874 - vijay, 9840096273 - Rajesh', 'Leaseline (2mbps)', None, None],
-        ['10', 'Kriloskar', 'John, Navanitha Krishnan for service', 'Hohn - 9840338989, Navanitha Krishnan - 9176628497', 'Genset', '42033316', 'Service : 9444990295'],
-        ['11', 'Building Electrician', 'Munna', '9789880051-prim, 9841435251 - sec', 'Electrician', None, None],
+        ['1', 'Net4india', '044-2833510', '9840870874 - vijay', 'Leaseline (2mbps)', None, None],
     ],
-    'Keyboard': [
+    'keyboard': [
         ['Keyboard Id', 'Brand', 'Status', 'S.No', 'Location'],
         ['KB001', 'APPLE', 'Working', 'KB-AP-01', 'In Guindy'],
-        ['K002', 'Microsoft', 'Working', 'KB-MS-02', 'In Cupboard'],
-        ['K003', 'Microsoft', 'Working', 'KB-MS-03', 'In Cupboard'],
     ],
-    'Laptop': [
+    'laptop': [
         ['Asset Tag', 'Name', 'Brand', 'Serial Number', 'Status', 'Current Location', 'Notes'],
         ['LT001', 'Dell Latitude 3420', 'Dell', 'DL-88231', 'Working', 'Office Floor', 'Assigned to Dev team'],
     ],
-    'Monitor': [
+    'monitor': [
         ['Monitor No', 'Brand', 'Type', 'Color', 'Size', 'Model', 'Serial No', 'Condition'],
         ['M001', 'Acer', 'LCD', 'Black', '17 inch', 'AL1516W', '73503405043', 'working'],
-        ['M007', 'Acer', 'LCD', 'Black', '17 inch', 'X193HQA', 'ETLEK0D025839041D98521', 'missing'],
-        ['M008', 'Samsung', 'LCD', 'Black', '17 Inch', 'SyncMaster E1720', 'V8BYH9NB400727T', 'working but no stand'],
     ],
-    'Mouse': [
+    'mouse': [
         ['Mouse', 'Brand', 'Status', 'S.No', 'Location'],
         ['MS001', 'APPLE', 'Working', 'MS-AP-01', 'Guindy Office'],
-        ['R001', 'Microsoft', 'Working', 'MS-MS-01', 'Used by Bharath Kumar'],
-        ['R002', 'Microsoft', 'Working', 'MS-MS-02', 'Used by Geethanjalai'],
     ],
-    'Networking Equipment': [
+    'networking equipment': [
         ['Asset Tag', 'Name', 'Brand', 'Serial Number', 'Status', 'Current Location', 'Notes'],
         ['NET001', 'Cisco 24 Port Switch', 'Cisco', 'CS-99120', 'Working', 'Server Room', 'Main rack switch'],
     ],
-    'Other Asset': [
+    'other asset': [
         ['Asset Tag', 'Name', 'Brand', 'Serial Number', 'Status', 'Current Location', 'Notes'],
         ['TV001', '55 inch TV', 'TCL', 'TCL-55-01', 'Working', 'Meeting Room', 'With Logitech camera'],
-        ['C001', 'Security Camera', 'MX', 'MX-C001', 'Working', 'BPO Office', 'Main entrance'],
-        ['C002', 'Security Camera', 'MX', 'MX-C002', 'Working', 'BPO Office', 'Server aisle'],
     ],
-    'Project Backup': [
+    'project backup': [
         ['Hard disk Name', 'Projects', 'Project Manager', 'Date', 'Space Free', 'Backup Available HDD'],
-        ['CL002', 'Auto XML and Marketing', 'Dhamu', '2017', None, None],
         ['EH003', 'Koln', 'Vinoth', '2016-10-01 00:00:00', '159 GB', None],
-        ['EH003', 'Stampkort', 'Sreenivasulu / Murali', '2017', None, None],
     ],
-    'Project Details': [
+    'project details': [
         ['S.No', 'Project Name', 'Status'],
         ['16', 'Alma Books', 'Working'],
-        ['6', 'BASF', 'Working'],
-        ['14', 'BKM', 'Working'],
     ],
-    'Software - OS License': [
+    'software - os license': [
         ['Type', 'Version', 'Product Key', 'System No', 'Details'],
         ['Microsoft OS', 'Pro', '6FYFF-T2BWF-4CQTV-MXMTT-FT4YJ', '5 users', None],
-        ['Microsoft OS', 'Pro', 'B7NGJ-3T9Q9-YKDTX-PVQHM-FGDGP', 'Amudhan', None],
-        ['Microsoft OS', 'Server 2025', 'Q9TY6-7N6KT-HJGBD-Y3G7F-X2H7M', 'Ancestry Server', None],
     ],
-    'UPS': [
+    'ups': [
         ['UPS No', 'Brand', 'Color', 'Model No', 'Size', 'Last Service Date', 'Condition', 'Details', 'Current Status'],
-        ['U 0113 to 0117', 'Numeric', 'Black', '600VA', None, None, 'Working', 'Purchased on 11-06-2025', None],
         ['U001', '3PE', 'Black & Red', 'Sizzle-1000', 'Big Size', '-', 'destroyed', None, None],
-        ['U002', '3PE', 'Black & White', 'BP-1200', 'Big Size', '-', 'destroyed', None, None],
     ],
-    'Workstation': [
+    'workstation': [
         [
-            'Workstation ID', 'Employee ID', 'Employee Name', 'CPU Number',
+            'Workstation ID', 'Status', 'Employee ID', 'Employee Name', 'CPU Number',
             'Monitor Number', 'Keyboard Number', 'Mouse Number', 'UPS No.',
             'Product Id', 'Cd Key', 'Operating System', 'Purposes', 'User Id',
         ],
-        ['WS001', 'TR1638', 'Nagoor Meeran', '049', 'M056', 'K029', 'R021', 'U0', '00426-OEM-8992662-00010', 'MHFPT-8C8M2-V9488-FGM44-2C9T3', 'Win 7 Ultimate x64 bit (Pirated)', 'System Administrator', 'SPSW070049'],
-        ['WS002', 'TR1648', 'Aruna', '036', 'M009', 'K069', 'R053', 'U070', '00326-10000-00000-AA074', 'YTMG3-N6DKC-DKB77-7M9GH-8HVX7', 'Win 10 Home x64 bit', 'Hard Disk Sharing', 'SPS070036@outlook.com'],
+        ['WS001', 'Working', 'TR1638', 'Nagoor Meeran', '049', 'M056', 'K029', 'R021', 'U0',
+         '00426-OEM-8992662-00010', 'MHFPT-8C8M2-V9488-FGM44-2C9T3',
+         'Win 7 Ultimate x64 bit (Pirated)', 'System Administrator', 'SPSW070049'],
     ],
 }
 
+# Common-field attribute name -> the label shown on a sample sheet for a
+# category that has NO configured fields of its own yet (mirrors
+# category_fields.DEFAULT_COMMON_FIELDS / get_common_fields).
+_COMMON_FIELD_LABELS = {
+    "status": "Status",
+    "brand": "Brand",
+    "model_number": "Model Number",
+    "serial_number": "Serial Number",
+    "current_assigned_to": "Current Assigned To",
+    "current_location": "Current Location",
+    "linked_workstation": "Linked Workstation",
+    "purchase_date": "Purchase Date",
+    "last_service_date": "Last Service Date",
+}
+
+
+def _headers_for_category(category):
+    """Live header list for a normal AssetCategory, using the exact same
+    priority chain (DB AssetField -> legacy sheet template -> curated ->
+    discovered) that forms and export already use."""
+    from .category_fields import get_category_fields, get_common_fields
+
+    fields = get_category_fields(category)
+    if fields:
+        return [f["label"] for f in fields]
+    # Brand-new category, nothing configured anywhere yet: same generic
+    # common-field set the Add/Edit form would fall back to.
+    common = get_common_fields(category)
+    return ["Asset Tag", "Name"] + [_COMMON_FIELD_LABELS[a] for a in common if a in _COMMON_FIELD_LABELS] + ["Notes"]
+
+
+def _headers_for_workstation():
+    from .category_fields import get_workstation_fields
+
+    return ["Workstation ID", "Status"] + [f["label"] for f in get_workstation_fields()]
+
+
+def _matching_example_rows(category_name, live_headers):
+    """Returns [example_row, ...] (no header row) only if this category's
+    static example was captured against headers identical (case/space
+    insensitive, any order-independent set match) to its CURRENT live
+    headers — otherwise the example is stale (a field was added/renamed/
+    removed since) and must not be shown."""
+    example = SAMPLE_ROWS.get(str(category_name or "").strip().lower())
+    if not example:
+        return []
+    example_headers, *example_data_rows = example
+    if {_norm(h) for h in example_headers} != {_norm(h) for h in live_headers}:
+        return []
+    # Reorder each example row to match live_headers' order (example was
+    # captured in example_headers' order, which may differ).
+    index_in_example = {_norm(h): i for i, h in enumerate(example_headers)}
+    out = []
+    for row in example_data_rows:
+        out.append([
+            row[index_in_example[_norm(h)]] if index_in_example[_norm(h)] < len(row) else None
+            for h in live_headers
+        ])
+    return out
+
+
+def _fill_sheet(ws, headers, data_rows, header_font, header_fill, header_align):
+    from openpyxl.utils import get_column_letter
+
+    for row in [headers] + data_rows:
+        ws.append(row)
+
+    for col_idx, value in enumerate(headers, start=1):
+        if value is None or str(value).strip() == "":
+            continue
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_align
+
+        longest = len(str(value))
+        for row in data_rows:
+            if col_idx <= len(row) and row[col_idx - 1] is not None:
+                longest = max(longest, len(str(row[col_idx - 1])))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max(longest + 3, 12), 45)
+
+    ws.freeze_panes = "A2"
+    ws.row_dimensions[1].height = 20
+
 
 def build_sample_workbook(headers_only=True):
-    """Builds the Asset_Import_Template.xlsx workbook entirely in code (no
-    static file on disk) and returns it as an openpyxl Workbook.
+    """Builds the Asset_Import_Template.xlsx workbook entirely from LIVE
+    database configuration and returns it as an openpyxl Workbook:
 
-    Generates a clean, professional template matching all 19 asset categories
-    with continuous columns and no empty spacer columns.
+      - One sheet per AssetCategory currently in the database (excluding
+        Workstation), with that category's live active AssetField labels
+        as columns (or the generic common-field set for a brand-new,
+        unconfigured category).
+      - One "Workstation" sheet with the live active WorkstationField
+        labels as columns.
+
+    No static sheet list or header list drives this — add a category or a
+    field anywhere in the app and the very next download includes it, with
+    no code change here.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
-    from openpyxl.utils import get_column_letter
+    from .models import AssetCategory
 
     header_fill = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
@@ -178,30 +245,33 @@ def build_sample_workbook(headers_only=True):
     wb = Workbook()
     wb.remove(wb.active)
 
-    for name in SHEET_ORDER:
-        ws = wb.create_sheet(name)
-        rows_data = SHEET_DATA.get(name, [])
-        rows = rows_data[:1] if headers_only else rows_data
-        for row in rows:
-            ws.append(row)
+    used_names = set()
 
-        header_row = rows_data[0] if rows_data else []
-        for col_idx, value in enumerate(header_row, start=1):
-            if value is None or str(value).strip() == "":
-                continue
-            cell = ws.cell(row=1, column=col_idx)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = header_align
+    def sheet_title(name):
+        clean = re.sub(r'[\\/?*\[\]:]', "-", name).strip()[:31]
+        base, n = clean, 1
+        while clean.lower() in used_names:
+            suffix = f" ({n})"
+            clean = base[: 31 - len(suffix)] + suffix
+            n += 1
+        used_names.add(clean.lower())
+        return clean
 
-            longest = len(str(value))
-            for row in rows[1:]:
-                if col_idx <= len(row) and row[col_idx - 1] is not None:
-                    longest = max(longest, len(str(row[col_idx - 1])))
-            ws.column_dimensions[get_column_letter(col_idx)].width = min(max(longest + 3, 12), 45)
+    categories = AssetCategory.objects.exclude(name__iexact="workstation").order_by("name")
+    for category in categories:
+        headers = _headers_for_category(category)
+        if not headers:
+            continue
+        data_rows = [] if headers_only else _matching_example_rows(category.name, headers)
+        ws = wb.create_sheet(sheet_title(category.name))
+        _fill_sheet(ws, headers, data_rows, header_font, header_fill, header_align)
 
-        ws.freeze_panes = "A2"
-        ws.row_dimensions[1].height = 20
+    # Workstation — its own sheet, driven by WorkstationField, never by
+    # AssetCategory/AssetField (Workstation is not a normal category).
+    ws_headers = _headers_for_workstation()
+    data_rows = [] if headers_only else _matching_example_rows("workstation", ws_headers)
+    ws_sheet = wb.create_sheet(sheet_title("Workstation"))
+    _fill_sheet(ws_sheet, ws_headers, data_rows, header_font, header_fill, header_align)
 
     return wb
 

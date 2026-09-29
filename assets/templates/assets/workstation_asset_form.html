@@ -1,0 +1,301 @@
+{% extends "assets/base.html" %}
+{% load asset_extras %}
+{% block title %}{{ title }} - Asset Register{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4 mx-auto" style="max-width: 760px;">
+    <h3 class="fw-bold text-secondary">{{ title }}</h3>
+    <a href="{% url 'assets:workstation_list' %}" class="btn-back">
+        <i class="bi bi-arrow-left"></i> Back to {{ ws_label }}
+    </a>
+</div>
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 760px;">
+    <form method="post" id="workstation-form">
+        {% csrf_token %}
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Workstation ID</label>
+                <input type="text" name="asset_tag" class="form-control" value="{{ asset.asset_tag|default:'' }}" required>
+                <div class="form-text">Unique ID</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Branch</label>
+                <select name="branch" id="id_branch" class="form-select" required>
+                    <option value="">—</option>
+                    {% for b in accessible_branches %}
+                    <option value="{{ b.id }}" {% if b.id == selected_branch_id %}selected{% endif %}>{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">Status</label>
+                <select name="status" class="form-select">
+                    {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if value == selected_status %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Fields configured via the Workstation Field Builder -->
+            {% for field in fields %}
+            <div class="col-md-{% if field.width == 12 %}12{% else %}6{% endif %}">
+                <label class="form-label fw-semibold">
+                    {{ field.label }}{% if field.required %} <span class="text-danger">*</span>{% endif %}
+                </label>
+
+                {% if field.type == "lookup" and field.lookup_multi %}
+                <div class="ws-combo-multi position-relative" data-lookup-category="{{ field.lookup_category }}">
+                    <div class="ws-combo-chips mb-1"></div>
+                    <input type="text" class="form-control ws-combo-input" autocomplete="off" placeholder="{{ field.placeholder|default:'Type to search…' }}">
+                    <input type="hidden" name="{{ field.name }}" class="ws-combo-value" value="{{ field.value_json }}">
+                    <div class="ws-combo-dropdown"></div>
+                </div>
+
+                {% elif field.type == "lookup" %}
+                <div class="ws-combo-single position-relative" data-lookup-category="{{ field.lookup_category }}">
+                    <input type="text" class="form-control ws-combo-input" autocomplete="off"
+                           placeholder="{{ field.placeholder|default:'Type to search…' }}" value="{{ field.value }}">
+                    <input type="hidden" name="{{ field.name }}" class="ws-combo-value" value="{{ field.value }}">
+                    <div class="ws-combo-dropdown"></div>
+                </div>
+
+                {% elif field.type == "select" %}
+                <select name="{{ field.name }}" class="form-select" {% if field.required %}required{% endif %}>
+                    <option value="">—</option>
+                    {% for opt in field.options %}
+                    <option value="{{ opt }}" {% if opt == field.value %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+
+                {% elif field.type == "textarea" %}
+                <textarea name="{{ field.name }}" class="form-control" rows="3"
+                          placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>{{ field.value }}</textarea>
+
+                {% else %}
+                <input type="{% if field.type == 'date' %}date{% elif field.type == 'number' %}number{% elif field.type == 'email' %}email{% elif field.type == 'url' %}url{% else %}text{% endif %}"
+                       name="{{ field.name }}" class="form-control" value="{{ field.value }}"
+                       placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>
+                {% endif %}
+
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            </div>
+            {% endfor %}
+
+            <div class="col-12">
+                <label class="form-label fw-semibold">Notes</label>
+                <textarea name="notes" class="form-control" rows="3">{{ asset.notes|default:"" }}</textarea>
+            </div>
+
+            {% if asset %}
+            <div class="col-12 form-check ms-1">
+                <input type="checkbox" name="is_active" value="true" class="form-check-input" id="id_is_active" {% if asset.is_active %}checked{% endif %}>
+                <label class="form-check-label" for="id_is_active">Active</label>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="mt-4 d-flex gap-2">
+            <button type="submit" class="btn btn-swift px-4">Save</button>
+        </div>
+    </form>
+</div>
+
+<style>
+    .ws-combo-dropdown {
+        position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+        background: #fff; border: 1px solid #dde3ec; border-radius: 10px;
+        box-shadow: 0 8px 20px -8px rgba(20,30,45,0.25); z-index: 20;
+        max-height: 260px; overflow-y: auto; display: none;
+    }
+    .ws-combo-item { padding: .5rem .8rem; font-size: .88rem; cursor: pointer; }
+    .ws-combo-item:hover, .ws-combo-item.active { background: rgba(41,171,226,0.12); }
+    .ws-combo-empty { padding: .5rem .8rem; font-size: .82rem; color: #8a94a3; }
+    .ws-chip { font-size: .82rem; display: inline-block; }
+    .ws-chip-remove { font-weight: 600; margin-left: 2px; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const lookupUrl = "{% url 'assets:asset_lookup' %}";
+    const branchSelect = document.getElementById('id_branch');
+
+    function escapeHtml(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function runLookup(category, query, cb) {
+        const branchId = branchSelect ? branchSelect.value : '';
+        const params = new URLSearchParams({ category: category, q: query, branch: branchId });
+        fetch(lookupUrl + '?' + params.toString())
+            .then(function (res) { return res.json(); })
+            .then(function (data) { cb(data.results || []); })
+            .catch(function () { cb([]); });
+    }
+
+    // Single-value Lookup fields
+    document.querySelectorAll('.ws-combo-single').forEach(function (wrap) {
+        const category = wrap.dataset.lookupCategory;
+        const input = wrap.querySelector('.ws-combo-input');
+        const hidden = wrap.querySelector('.ws-combo-value');
+        const dropdown = wrap.querySelector('.ws-combo-dropdown');
+        let debounce = null;
+
+        function search(q) {
+            runLookup(category, q, function (results) {
+                dropdown.innerHTML = results.length
+                    ? results.map(function (r) {
+                        return '<div class="ws-combo-item" data-tag="' + escapeHtml(r.tag) + '" data-name="' + escapeHtml(r.name || '') + '">' + escapeHtml(r.tag) + '</div>';
+                      }).join('')
+                    : '<div class="ws-combo-empty">No matching ' + escapeHtml(category) + ' found</div>';
+                dropdown.style.display = 'block';
+            });
+        }
+        input.addEventListener('input', function () {
+            hidden.value = '';
+            clearTimeout(debounce);
+            const q = this.value;
+            debounce = setTimeout(function () { search(q); }, 180);
+        });
+        input.addEventListener('focus', function () { search(this.value); });
+        dropdown.addEventListener('click', function (e) {
+            const item = e.target.closest('.ws-combo-item');
+            if (!item) return;
+            // Fill the input with just the ID (not the full "ID — Name" label)
+            input.value = item.dataset.tag;
+            hidden.value = item.dataset.tag;
+            // Auto-fill Employee Name field when an Employee lookup is selected
+            var catLower = (category || '').toLowerCase();
+            if (catLower === 'employee' || catLower === 'employee list') {
+                var nameInput = document.querySelector('input[name="Employee Name"], input[name="employee_name"], input[name="employee name"]');
+                if (nameInput) {
+                    nameInput.value = item.dataset.name || '';
+                }
+            }
+            dropdown.style.display = 'none';
+        });
+        input.addEventListener('keydown', function (e) {
+            if (dropdown.style.display !== 'block') return;
+            const items = dropdown.querySelectorAll('.ws-combo-item');
+            if (!items.length) return;
+            let activeIdx = Array.from(items).findIndex(i => i.classList.contains('active'));
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (activeIdx >= 0) items[activeIdx].classList.remove('active');
+                activeIdx = (activeIdx + 1) % items.length;
+                items[activeIdx].classList.add('active');
+                items[activeIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (activeIdx >= 0) items[activeIdx].classList.remove('active');
+                activeIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
+                items[activeIdx].classList.add('active');
+                items[activeIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                if (activeIdx >= 0) {
+                    e.preventDefault();
+                    items[activeIdx].click();
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.style.display = 'none';
+            }
+        });
+        document.addEventListener('click', function (e) {
+            if (!wrap.contains(e.target)) dropdown.style.display = 'none';
+        });
+    });
+
+    // Multi-value Lookup fields (chips)
+    document.querySelectorAll('.ws-combo-multi').forEach(function (wrap) {
+        const category = wrap.dataset.lookupCategory;
+        const input = wrap.querySelector('.ws-combo-input');
+        const hidden = wrap.querySelector('.ws-combo-value');
+        const dropdown = wrap.querySelector('.ws-combo-dropdown');
+        const chipsWrap = wrap.querySelector('.ws-combo-chips');
+        let tags = [];
+        try { tags = JSON.parse(hidden.value || '[]'); } catch (e) { tags = []; }
+
+        function renderChips() {
+            chipsWrap.innerHTML = tags.map(function (t) {
+                return '<span class="badge bg-primary-subtle text-primary border me-1 mb-1 ws-chip">' + escapeHtml(t) +
+                       ' <a href="#" class="text-danger text-decoration-none ws-chip-remove" data-tag="' + escapeHtml(t) + '">&times;</a></span>';
+            }).join('');
+            hidden.value = JSON.stringify(tags);
+        }
+        renderChips();
+
+        function addTag(tag) {
+            if (!tag || tags.indexOf(tag) !== -1) return;
+            tags.push(tag);
+            renderChips();
+            input.value = '';
+        }
+        chipsWrap.addEventListener('click', function (e) {
+            const rm = e.target.closest('.ws-chip-remove');
+            if (!rm) return;
+            e.preventDefault();
+            tags = tags.filter(function (t) { return t !== rm.dataset.tag; });
+            renderChips();
+        });
+
+        let debounce = null;
+        function search(q) {
+            runLookup(category, q, function (results) {
+                const filtered = results.filter(function (r) { return tags.indexOf(r.tag) === -1; });
+                dropdown.innerHTML = filtered.length
+                    ? filtered.map(function (r) {
+                        return '<div class="ws-combo-item" data-tag="' + escapeHtml(r.tag) + '">' + escapeHtml(r.tag) + '</div>';
+                      }).join('')
+                    : '<div class="ws-combo-empty">No matching ' + escapeHtml(category) + ' found</div>';
+                dropdown.style.display = 'block';
+            });
+        }
+        input.addEventListener('input', function () {
+            clearTimeout(debounce);
+            const q = this.value;
+            debounce = setTimeout(function () { search(q); }, 180);
+        });
+        input.addEventListener('focus', function () { search(this.value); });
+        dropdown.addEventListener('click', function (e) {
+            const item = e.target.closest('.ws-combo-item');
+            if (!item) return;
+            addTag(item.dataset.tag);
+            dropdown.style.display = 'none';
+        });
+        input.addEventListener('keydown', function (e) {
+            if (dropdown.style.display !== 'block') return;
+            const items = dropdown.querySelectorAll('.ws-combo-item');
+            if (!items.length) return;
+            let activeIdx = Array.from(items).findIndex(i => i.classList.contains('active'));
+            
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (activeIdx >= 0) items[activeIdx].classList.remove('active');
+                activeIdx = (activeIdx + 1) % items.length;
+                items[activeIdx].classList.add('active');
+                items[activeIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (activeIdx >= 0) items[activeIdx].classList.remove('active');
+                activeIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
+                items[activeIdx].classList.add('active');
+                items[activeIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                if (activeIdx >= 0) {
+                    e.preventDefault();
+                    items[activeIdx].click();
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.style.display = 'none';
+            }
+        });
+        document.addEventListener('click', function (e) {
+            if (!wrap.contains(e.target)) dropdown.style.display = 'none';
+        });
+    });
+});
+</script>
+
+{% endblock %}

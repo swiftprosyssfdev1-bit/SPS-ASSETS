@@ -3,7 +3,13 @@ from assets.models import AssetCategory
 
 DEFAULT_CATEGORIES = [
     ("Employee", "bi-person-badge", "Legacy 'Employee_List' sheet — employee ID / name register"),
-    ("Workstation", "bi-pc-display", "Employee workstation (links CPU, monitor, keyboard, mouse, UPS)"),
+    # NOTE: "Workstation" is intentionally NOT seeded here. Workstation is a
+    # first-class module of its own (see views.workstation_list), not a
+    # normal Asset Category, so new installations should never get a
+    # Workstation AssetCategory row from this command. Existing installs
+    # that already have one (created before this change) keep it — see the
+    # inspect_workstation_category management command for how to check
+    # references before touching that row.
     ("CPU / System Unit", "bi-cpu", "Desktop CPU / system unit"),
     ("Monitor", "bi-display", "Monitors / screens"),
     ("Keyboard", "bi-keyboard", "Keyboards"),

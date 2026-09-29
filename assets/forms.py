@@ -34,6 +34,17 @@ class AssetForm(forms.ModelForm):
 
     def __init__(self, *args, accessible_branches=None, user=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # Workstation is its own module now (see views.workstation_list) —
+        # it should not be offered as a category when creating or editing
+        # a normal asset. The one exception: an asset that is ALREADY a
+        # Workstation record (one of the 45 legacy rows) must keep showing
+        # its current category in the dropdown so re-saving that asset
+        # (e.g. to edit its notes) doesn't fail validation.
+        category_qs = AssetCategory.objects.exclude(name__iexact="Workstation")
+        if self.instance is not None and self.instance.pk and self.instance.category_id:
+            if self.instance.category.name.strip().lower() == "workstation":
+                category_qs = AssetCategory.objects.all()
+        self.fields["category"].queryset = category_qs
         if accessible_branches is not None:
             self.fields["branch"].queryset = accessible_branches
         self.fields["branch"].required = True
@@ -76,6 +87,13 @@ class AssetForm(forms.ModelForm):
 
 
 class AssetCategoryForm(forms.ModelForm):
+    def __init__(self, *args, lock_name=False, reserved_names=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._reserved_names = {str(n).strip().lower() for n in (reserved_names or [])}
+        if lock_name:
+            # built-in category: name is used by code, so it stays fixed
+            self.fields["name"].disabled = True
+
     class Meta:
         model = AssetCategory
         fields = ["name", "icon", "description", "show_under_other"]
@@ -85,6 +103,20 @@ class AssetCategoryForm(forms.ModelForm):
             "description": forms.TextInput(attrs={"class": "form-control"}),
             "show_under_other": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
+
+    def clean_name(self):
+        name = self.cleaned_data["name"]
+        if name.strip().lower() == "workstation":
+            raise forms.ValidationError(
+                "\"Workstation\" is reserved for the dedicated Workstation module "
+                "and can't be created as a normal Asset Category."
+            )
+        if (self.instance.pk and name.strip().lower() != self.instance.name.strip().lower()
+                and name.strip().lower() in self._reserved_names):
+            raise forms.ValidationError(
+                "That name belongs to a built-in category and can't be used."
+            )
+        return name
 
 
 class BranchForm(forms.ModelForm):

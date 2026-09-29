@@ -4,7 +4,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-4 mx-auto" style="max-width: 560px;">
     <h3 class="fw-bold text-secondary">{{ title }}</h3>
-    <a href="{% url 'assets:dashboard' %}" class="btn-back">
+    <a href="{% if category %}{% url 'assets:category_detail' category.id %}{% else %}{% url 'assets:dashboard' %}{% endif %}" class="btn-back">
         <i class="bi bi-arrow-left"></i> Back to Dashboard
     </a>
 </div>
@@ -15,6 +15,8 @@
         <div class="mb-3">
             <label class="form-label fw-semibold">Category Name</label>
             {{ form.name }}
+            {% if name_locked %}<div class="form-text">Built-in category — the name is used by the system and can't be changed.</div>{% endif %}
+            {% for e in form.name.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
         </div>
         <div class="mb-3">
             <label class="form-label fw-semibold">Icon (optional)</label>

@@ -1,0 +1,583 @@
+{% extends "assets/base.html" %}
+{% block title %}Workstation — Field Builder{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fb-header {
+        background: linear-gradient(120deg, var(--swift-navy) 0%, #24384b 100%);
+        border-radius: 18px;
+        padding: 28px 32px;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 10px 30px -12px rgba(28,43,58,.45);
+    }
+    .fb-header::after {
+        content: "";
+        position: absolute; inset: 0;
+        background: radial-gradient(600px 200px at 100% 0%, rgba(41,171,226,.35), transparent 60%);
+        pointer-events: none;
+    }
+    .fb-header .fb-icon {
+        width: 52px; height: 52px; border-radius: 14px;
+        background: rgba(255,255,255,.12);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.4rem; color: #fff;
+        border: 1px solid rgba(255,255,255,.18);
+    }
+    .fb-header h3 { color: #fff; letter-spacing: -.3px; }
+    .fb-header .fb-sub { color: rgba(255,255,255,.68); font-size: .88rem; max-width: 560px; }
+    .fb-header .badge-live {
+        background: rgba(41,171,226,.22); color: #7fd4ff; border: 1px solid rgba(127,212,255,.35);
+        font-weight: 600; letter-spacing: .3px;
+    }
+    .fb-stats { position: relative; z-index: 1; }
+    .fb-stat-chip {
+        background: rgba(255,255,255,.08);
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 12px;
+        padding: 10px 16px;
+        min-width: 92px;
+        backdrop-filter: blur(2px);
+    }
+    .fb-stat-chip .num { font-size: 1.35rem; font-weight: 800; line-height: 1; color: #fff; }
+    .fb-stat-chip .lbl { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.55); margin-top: 3px; }
+
+    .fb-back {
+        background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.22);
+        border-radius: 10px; padding: 8px 16px; font-size: .85rem; font-weight: 500;
+        transition: all .15s ease;
+    }
+    .fb-back:hover { background: rgba(255,255,255,.2); color: #fff; }
+
+    .fb-panel {
+        background: #fff;
+        border: 1px solid #e7ebf1;
+        border-radius: 16px;
+        box-shadow: 0 2px 10px -4px rgba(28,43,58,.08);
+    }
+    .fb-panel-head {
+        padding: 18px 22px;
+        border-bottom: 1px solid #eef1f6;
+        display: flex; align-items: center; justify-content: space-between;
+    }
+    .fb-panel-title { font-weight: 700; color: var(--swift-navy); font-size: 1rem; display:flex; align-items:center; gap:.5rem; }
+    .fb-panel-title .count-pill {
+        background: rgba(41,171,226,.12); color: var(--swift-blue-dark);
+        font-size: .72rem; font-weight: 700; border-radius: 20px; padding: 2px 10px;
+    }
+    .fb-add-btn {
+        background: var(--swift-blue); border: none; color: #fff; font-weight: 600;
+        border-radius: 10px; padding: 8px 16px; font-size: .85rem;
+        box-shadow: 0 4px 12px -3px rgba(41,171,226,.55);
+        transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .fb-add-btn:hover { background: var(--swift-blue-dark); color: #fff; transform: translateY(-1px); box-shadow: 0 6px 16px -3px rgba(41,171,226,.6); }
+
+    .fb-empty { padding: 56px 20px; text-align:center; color: #94a0b0; }
+    .fb-empty .bi { font-size: 2.4rem; color: #c7d0dc; }
+
+    #field-list { padding: 14px; }
+    .field-card {
+        display: flex; align-items: flex-start; gap: 12px;
+        background: #fbfcfe;
+        border: 1px solid #e9edf3;
+        border-radius: 12px;
+        padding: 13px 14px;
+        margin-bottom: 8px;
+        transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
+    }
+    .field-card:hover { border-color: #cfe2f0; box-shadow: 0 3px 10px -4px rgba(28,43,58,.1); background: #fff; }
+    .field-card.is-inactive { opacity: .55; background: #f6f7f9; }
+    .field-card .drag-handle { cursor: grab; color: #c2cad6; font-size: 1.05rem; padding-top: 5px; }
+    .field-card .drag-handle:active { cursor: grabbing; }
+
+    .type-icon {
+        width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center; font-size: .95rem;
+    }
+    .type-icon.t-text, .type-icon.t-textarea { background: rgba(108,117,125,.12); color: #5a6472; }
+    .type-icon.t-select { background: rgba(111,66,193,.12); color: #6f42c1; }
+    .type-icon.t-number { background: rgba(32,201,151,.14); color: #17a589; }
+    .type-icon.t-date { background: rgba(247,148,29,.15); color: var(--swift-orange); }
+    .type-icon.t-email, .type-icon.t-url { background: rgba(41,171,226,.14); color: var(--swift-blue-dark); }
+    .type-icon.t-lookup { background: rgba(41,171,226,.16); color: var(--swift-blue-dark); }
+
+    .field-card .f-label { font-weight: 650; color: var(--swift-navy); font-size: .92rem; }
+    .field-card .f-key { font-size: .72rem; color: #9aa4b2; margin-top: 2px; }
+    .field-card .f-key code { color: #6f7c8d; background: #eef1f6; padding: 1px 6px; border-radius: 5px; font-size: .71rem; }
+    .field-card .f-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .f-badge {
+        font-size: .68rem; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+        background: #eef1f6; color: #5a6472; border: 1px solid #e2e7ee;
+    }
+    .f-badge.badge-req { background: rgba(220,53,69,.09); color: #c62839; border-color: rgba(220,53,69,.18); }
+    .f-badge.badge-inactive { background: #e2e7ee; color: #6b7686; }
+    .f-badge.badge-lookup { background: rgba(41,171,226,.1); color: var(--swift-blue-dark); border-color: rgba(41,171,226,.2); }
+
+    .field-card .f-actions { display: flex; gap: 6px; padding-top: 2px; }
+    .icon-btn {
+        width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+        border: 1px solid #e2e7ee; background: #fff; color: #5a6472; transition: all .12s ease; font-size: .85rem;
+    }
+    .icon-btn:hover { background: var(--swift-blue); border-color: var(--swift-blue); color: #fff; }
+    .icon-btn.danger:hover { background: #dc3545; border-color: #dc3545; color: #fff; }
+    .icon-btn.success:hover { background: #28a745; border-color: #28a745; color: #fff; }
+
+    /* Live preview frame */
+    .preview-frame { border-radius: 14px; overflow: hidden; border: 1px solid #e7ebf1; }
+    .preview-titlebar {
+        background: #f3f5f9; padding: 10px 14px; display: flex; align-items: center; gap: 8px;
+        border-bottom: 1px solid #e7ebf1;
+    }
+    .preview-titlebar .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .preview-titlebar .dot.r { background: #ff5f57; } .preview-titlebar .dot.y { background: #febc2e; } .preview-titlebar .dot.g { background: #28c840; }
+    .preview-titlebar .label { margin-left: 6px; font-size: .74rem; font-weight: 600; color: #7c8798; display:flex; align-items:center; gap:5px; }
+    .preview-titlebar .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #28c840; display:inline-block; animation: pulse-dot 1.6s infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+    .preview-body { padding: 20px; background: #fff; max-height: 640px; overflow-y: auto; }
+    .preview-body .form-label { font-size: .8rem; }
+    .preview-body .form-control, .preview-body .form-select { font-size: .84rem; background: #fbfcfe; }
+    .preview-empty { text-align: center; color: #9aa4b2; padding: 48px 10px; font-size: .85rem; }
+
+    /* Modal polish */
+    .modal-content { border-radius: 16px; border: none; overflow: hidden; }
+    .modal-header { background: #f8fafc; border-bottom: 1px solid #eef1f6; padding: 18px 24px; }
+    .modal-header .modal-title { color: var(--swift-navy); }
+    .modal-body { padding: 22px 24px; }
+    .modal-footer { border-top: 1px solid #eef1f6; padding: 14px 24px; }
+    .fb-section-label {
+        font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+        color: #8b96a5; margin-bottom: 10px; padding-top: 4px; border-top: 1px dashed #e7ebf1;
+    }
+    .row.g-3 > .fb-section-label:first-child { border-top: none; padding-top: 0; }
+    .vis-check {
+        border: 1px solid #e7ebf1; border-radius: 10px; padding: 8px 12px; background: #fbfcfe;
+        flex: 1 1 0; min-width: 140px;
+    }
+    .lookup-box {
+        border: 1px solid rgba(41,171,226,.25); background: rgba(41,171,226,.05);
+        border-radius: 12px; padding: 14px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fb-header d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+    <div class="d-flex gap-3">
+        <div class="fb-icon"><i class="bi bi-pc-display-horizontal"></i></div>
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h3 class="fw-bold mb-0">Workstation</h3>
+                <span class="badge badge-live rounded-pill px-2 py-1"><i class="bi bi-lightning-charge-fill me-1"></i>Field Builder</span>
+            </div>
+            <div class="fb-sub mt-1">Configure the fields on the Workstation module's Add / Edit / Detail forms. Changes take effect immediately.</div>
+        </div>
+    </div>
+    <div class="d-flex align-items-center gap-3 fb-stats flex-wrap">
+        <div class="fb-stat-chip text-center">
+            <div class="num">{{ fields|length }}</div>
+            <div class="lbl">Fields</div>
+        </div>
+        <a href="{% url 'assets:workstation_list' %}" class="fb-back">
+            <i class="bi bi-arrow-left me-1"></i> Back to Workstation
+        </a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="fb-panel">
+            <div class="fb-panel-head">
+                <span class="fb-panel-title">
+                    <i class="bi bi-list-check text-primary"></i> Configured Fields
+                    <span class="count-pill">{{ fields|length }}</span>
+                </span>
+                <button class="fb-add-btn" onclick="showAddModal()">
+                    <i class="bi bi-plus-lg me-1"></i> Add Field
+                </button>
+            </div>
+
+            {% if not fields %}
+            <div class="fb-empty">
+                <i class="bi bi-layout-wtf d-block mb-2"></i>
+                <div class="fw-semibold" style="color:#6b7686;">No fields configured yet</div>
+                <div class="small mt-1">Click <strong>Add Field</strong> to start building this form.</div>
+            </div>
+            {% else %}
+            <div id="field-list">
+                {% for f in fields %}
+                <div class="field-card {% if not f.is_active %}is-inactive{% endif %}"
+                     data-field-id="{{ f.pk }}">
+                    <i class="bi bi-grip-vertical drag-handle" title="Drag to reorder"></i>
+                    <div class="type-icon t-{{ f.field_type }}">
+                        {% if f.field_type == "textarea" %}<i class="bi bi-text-paragraph"></i>
+                        {% elif f.field_type == "select" %}<i class="bi bi-menu-button-wide"></i>
+                        {% elif f.field_type == "number" %}<i class="bi bi-123"></i>
+                        {% elif f.field_type == "date" %}<i class="bi bi-calendar3"></i>
+                        {% elif f.field_type == "email" %}<i class="bi bi-envelope"></i>
+                        {% elif f.field_type == "url" %}<i class="bi bi-link-45deg"></i>
+                        {% elif f.field_type == "lookup" %}<i class="bi bi-link-45deg"></i>
+                        {% else %}<i class="bi bi-input-cursor-text"></i>{% endif %}
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="f-label">{{ f.label }}</div>
+                        <div class="f-key">key: <code>{{ f.key }}</code></div>
+                        <div class="f-meta">
+                            <span class="f-badge">{{ f.get_field_type_display }}</span>
+                            {% if f.field_type == "lookup" %}
+                            <span class="f-badge badge-lookup"><i class="bi bi-arrow-right-short"></i>{{ f.lookup_category }}{% if f.lookup_multi %} (multi){% endif %}</span>
+                            {% endif %}
+                            <span class="f-badge">col-{{ f.width }}</span>
+                            {% if f.required %}<span class="f-badge badge-req"><i class="bi bi-asterisk" style="font-size:.55rem;"></i> Required</span>{% endif %}
+                            {% if not f.is_active %}<span class="f-badge badge-inactive"><i class="bi bi-eye-slash"></i> Inactive</span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="f-actions">
+                        <button class="icon-btn" title="Edit"
+                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, '{{ f.lookup_category|escapejs }}', {{ f.lookup_multi|yesno:'true,false' }}, '{{ f.options_text|escapejs }}')">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        {% if f.is_active %}
+                        <form method="post" action="{% url 'assets:workstation_field_deactivate' f.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="icon-btn danger" title="Deactivate (data preserved)"
+                                    onclick="return confirm('Deactivate field {{ f.label|escapejs }}? Existing Workstation data is NOT deleted.')">
+                                <i class="bi bi-eye-slash"></i>
+                            </button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{% url 'assets:workstation_field_reactivate' f.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="icon-btn success" title="Reactivate">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </form>
+                        <form method="post" action="{% url 'assets:workstation_field_delete' f.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="icon-btn danger" title="Delete permanently"
+                                    onclick="return confirm('Permanently delete field {{ f.label|escapejs }}? This cannot be undone. Any old stored values for it are simply left unused, not erased.')">
+                                <i class="bi bi-trash3"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="fb-panel preview-frame">
+            <div class="preview-titlebar">
+                <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+                <span class="label"><span class="live-dot"></span> Live Form Preview</span>
+            </div>
+            <div class="preview-body">
+                <div class="row g-3">
+                    {% for f in fields %}
+                    {% if f.is_active %}
+                    <div class="col-md-{{ f.width }}">
+                        <label class="form-label fw-semibold">{{ f.label }}{% if f.required %} <span class="text-danger">*</span>{% endif %}</label>
+                        {% if f.field_type == "textarea" %}
+                        <textarea class="form-control form-control-sm" rows="2" disabled placeholder="{{ f.placeholder }}"></textarea>
+                        {% elif f.field_type == "select" %}
+                        <select class="form-select form-select-sm" disabled>
+                            <option>—</option>
+                            {% for opt in f.options.all %}{% if opt.is_active %}<option>{{ opt.label }}</option>{% endif %}{% endfor %}
+                        </select>
+                        {% elif f.field_type == "lookup" %}
+                        <input type="text" class="form-control form-control-sm" disabled
+                               placeholder="Search {{ f.lookup_category }}{% if f.lookup_multi %} (multiple){% endif %}...">
+                        {% else %}
+                        <input type="{{ f.field_type|default:'text' }}" class="form-control form-control-sm" disabled placeholder="{{ f.placeholder }}">
+                        {% endif %}
+                        {% if f.help_text %}<div class="form-text">{{ f.help_text }}</div>{% endif %}
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                    {% if not fields %}
+                    <div class="col-12 preview-empty">
+                        <i class="bi bi-eye-slash d-block mb-2" style="font-size:1.6rem; color:#c7d0dc;"></i>
+                        No active fields to preview.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addFieldModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" action="{% url 'assets:workstation_field_add' %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-plus-circle text-primary me-2"></i>Add Field</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="fb-section-label">Basics</div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold">Field Label <span class="text-danger">*</span></label>
+                            <input type="text" name="label" class="form-control" required placeholder="e.g. Operating System">
+                            <div class="form-text">A stable internal key will be auto-generated from this label and locked.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Input Type</label>
+                            <select name="field_type" class="form-select" id="add-field-type" onchange="toggleFieldType(this,'add')">
+                                <option value="text">Single Line Text</option>
+                                <option value="textarea">Multi-Line Text</option>
+                                <option value="select">Dropdown</option>
+                                <option value="number">Number</option>
+                                <option value="date">Date</option>
+                                <option value="email">Email</option>
+                                <option value="url">URL</option>
+                                <option value="lookup">Lookup (link to another asset)</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="add-lookup-group" style="display:none;">
+                            <div class="lookup-box">
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Links to category</label>
+                                        <select name="lookup_category" class="form-select">
+                                            <option value="">— choose —</option>
+                                            {% for c in category_choices %}
+                                            <option value="{{ c.name }}">{{ c.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4 d-flex align-items-end">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="lookup_multi" value="true" id="lookup_multi_add">
+                                            <label class="form-check-label" for="lookup_multi_add">Allow multiple</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="fb-section-label w-100">Layout &amp; Validation</div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Width</label>
+                            <select name="width" class="form-select">
+                                <option value="6" selected>Half Width (col-6)</option>
+                                <option value="12">Full Width (col-12)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Required?</label>
+                            <select name="required" class="form-select">
+                                <option value="false" selected>Optional</option>
+                                <option value="true">Required</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Placeholder</label>
+                            <input type="text" name="placeholder" class="form-control" placeholder="Optional hint text">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Help Text</label>
+                            <input type="text" name="help_text" class="form-control" placeholder="Short description shown below the field">
+                        </div>
+                        <div class="col-12" id="add-options-group" style="display:none;">
+                            <label class="form-label fw-semibold">Dropdown Options <span class="text-muted fw-normal small">(one per line)</span></label>
+                            <textarea name="options" class="form-control" rows="5"></textarea>
+                        </div>
+
+                        <div class="fb-section-label w-100">Visibility</div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_list" value="true" checked id="sil_add"><label class="form-check-label" for="sil_add">Show in List</label></div>
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_detail" value="true" checked id="sid_add"><label class="form-check-label" for="sid_add">Show in Detail</label></div>
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_add" value="true" checked id="sia_add"><label class="form-check-label" for="sia_add">Show in Add Form</label></div>
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_edit" value="true" checked id="sie_add"><label class="form-check-label" for="sie_add">Show in Edit Form</label></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-swift"><i class="bi bi-check-lg me-1"></i>Save Field</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editFieldModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" id="edit-field-form" action="">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-pencil-square text-primary me-2"></i>Edit Field</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="fb-section-label">Basics</div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold">Field Label <span class="text-danger">*</span></label>
+                            <input type="text" name="label" id="edit-label" class="form-control" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Input Type</label>
+                            <select name="field_type" id="edit-field-type" class="form-select" onchange="toggleFieldType(this,'edit')">
+                                <option value="text">Single Line Text</option>
+                                <option value="textarea">Multi-Line Text</option>
+                                <option value="select">Dropdown</option>
+                                <option value="number">Number</option>
+                                <option value="date">Date</option>
+                                <option value="email">Email</option>
+                                <option value="url">URL</option>
+                                <option value="lookup">Lookup (link to another asset)</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="edit-lookup-group" style="display:none;">
+                            <div class="lookup-box">
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Links to category</label>
+                                        <select name="lookup_category" id="edit-lookup-category" class="form-select">
+                                            <option value="">— choose —</option>
+                                            {% for c in category_choices %}
+                                            <option value="{{ c.name }}">{{ c.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4 d-flex align-items-end">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="lookup_multi" value="true" id="lookup_multi_edit">
+                                            <label class="form-check-label" for="lookup_multi_edit">Allow multiple</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="fb-section-label w-100">Layout &amp; Validation</div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Width</label>
+                            <select name="width" id="edit-width" class="form-select">
+                                <option value="6">Half Width (col-6)</option>
+                                <option value="12">Full Width (col-12)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Required?</label>
+                            <select name="required" id="edit-required" class="form-select">
+                                <option value="false">Optional</option>
+                                <option value="true">Required</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Placeholder</label>
+                            <input type="text" name="placeholder" id="edit-placeholder" class="form-control">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Help Text</label>
+                            <input type="text" name="help_text" id="edit-help-text" class="form-control">
+                        </div>
+                        <div class="col-12" id="edit-options-group" style="display:none;">
+                            <label class="form-label fw-semibold">Dropdown Options <span class="text-muted fw-normal small">(one per line)</span></label>
+                            <textarea name="options" id="edit-options" class="form-control" rows="5"></textarea>
+                            <div class="form-text text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Removing an option only hides it from new entries. Existing Workstation records that used it are not affected.</div>
+                        </div>
+
+                        <div class="fb-section-label w-100">Visibility</div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_list" value="true" id="sil_edit"><label class="form-check-label" for="sil_edit">Show in List</label></div>
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_detail" value="true" id="sid_edit"><label class="form-check-label" for="sid_edit">Show in Detail</label></div>
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_add" value="true" id="sia_edit"><label class="form-check-label" for="sia_edit">Show in Add Form</label></div>
+                            <div class="form-check vis-check"><input class="form-check-input" type="checkbox" name="show_in_edit" value="true" id="sie_edit"><label class="form-check-label" for="sie_edit">Show in Edit Form</label></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-swift"><i class="bi bi-check-lg me-1"></i>Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function showAddModal() {
+    document.getElementById('addFieldModal').querySelector('form').reset();
+    toggleFieldType(document.getElementById('add-field-type'), 'add');
+    new bootstrap.Modal(document.getElementById('addFieldModal')).show();
+}
+
+function toggleFieldType(sel, prefix) {
+    document.getElementById(prefix + '-options-group').style.display = sel.value === 'select' ? '' : 'none';
+    document.getElementById(prefix + '-lookup-group').style.display = sel.value === 'lookup' ? '' : 'none';
+}
+
+function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, lookupCategory, lookupMulti, optionsText) {
+    document.getElementById('edit-label').value = label;
+    var ftSel = document.getElementById('edit-field-type');
+    ftSel.value = ftype;
+    toggleFieldType(ftSel, 'edit');
+    document.getElementById('edit-width').value = String(width);
+    document.getElementById('edit-required').value = required ? 'true' : 'false';
+    document.getElementById('edit-placeholder').value = placeholder;
+    document.getElementById('edit-help-text').value = helpText;
+    document.getElementById('sil_edit').checked = sil;
+    document.getElementById('sid_edit').checked = sid;
+    document.getElementById('sia_edit').checked = sia;
+    document.getElementById('sie_edit').checked = sie;
+    document.getElementById('edit-lookup-category').value = lookupCategory || '';
+    document.getElementById('lookup_multi_edit').checked = !!lookupMulti;
+    document.getElementById('edit-options').value = optionsText || '';
+    var form = document.getElementById('edit-field-form');
+    form.action = '/workstation/builder/field/' + fid + '/edit/';
+    new bootstrap.Modal(document.getElementById('editFieldModal')).show();
+}
+
+(function() {
+    var list = document.getElementById('field-list');
+    if (!list) return;
+    var dragged = null;
+
+    list.addEventListener('dragstart', function(e) {
+        dragged = e.target.closest('.field-card');
+        if (dragged) e.dataTransfer.effectAllowed = 'move';
+    });
+    list.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        var target = e.target.closest('.field-card');
+        if (target && target !== dragged) {
+            var rect = target.getBoundingClientRect();
+            var after = e.clientY > rect.top + rect.height / 2;
+            list.insertBefore(dragged, after ? target.nextSibling : target);
+        }
+    });
+    list.addEventListener('dragend', function() {
+        if (!dragged) return;
+        var order = Array.from(list.querySelectorAll('.field-card')).map(function(el) {
+            return parseInt(el.dataset.fieldId);
+        });
+        fetch('{% url "assets:workstation_field_reorder" %}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+            body: JSON.stringify({order: order}),
+        });
+        dragged = null;
+    });
+
+    list.querySelectorAll('.field-card').forEach(function(row) {
+        row.setAttribute('draggable', 'true');
+    });
+})();
+
+function getCookie(name) {
+    var v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+    return v ? v[2] : null;
+}
+</script>
+{% endblock %}

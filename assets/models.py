@@ -204,3 +204,328 @@ class ExportPassword(models.Model):
 
     def __str__(self):
         return "Excel export password"
+
+
+class AssetField(models.Model):
+    """
+    One configurable field per category, stored in the database.
+    Once a category has ANY AssetField rows (even inactive), it is
+    'intentionally configured' and sheet_templates/category_fields.py
+    fallbacks are permanently bypassed for it.
+
+    The `key` is auto-generated on creation and is IMMUTABLE afterwards
+    — the label may be renamed, but the key is what is stored in
+    Asset.extra_details, so changing it would orphan existing data.
+    """
+    FIELD_TYPES = [
+        ("text",     "Single Line Text"),
+        ("textarea", "Multi-Line Text"),
+        ("select",   "Dropdown"),
+        ("number",   "Number"),
+        ("date",     "Date"),
+        ("email",    "Email"),
+        ("url",      "URL"),
+    ]
+    WIDTH_CHOICES = [(6, "Half Width (col-6)"), (12, "Full Width (col-12)")]
+
+    category = models.ForeignKey(
+        AssetCategory, on_delete=models.PROTECT, related_name="fields"
+    )
+    label = models.CharField(max_length=150)
+    key = models.CharField(
+        max_length=100,
+        help_text="Stable internal key stored in Asset.extra_details. "
+                  "Auto-generated on creation; immutable afterwards.",
+    )
+    field_type = models.CharField(max_length=20, choices=FIELD_TYPES, default="text")
+    width = models.IntegerField(default=6, choices=WIDTH_CHOICES)
+    required = models.BooleanField(default=False)
+    placeholder = models.CharField(max_length=200, blank=True)
+    help_text = models.CharField(max_length=300, blank=True)
+    default_value = models.CharField(max_length=200, blank=True)
+    show_in_list = models.BooleanField(default=True)
+    show_in_detail = models.BooleanField(default=True)
+    show_in_add = models.BooleanField(default=True)
+    show_in_edit = models.BooleanField(default=True)
+    display_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_order", "id"]
+        unique_together = [("category", "key")]
+        verbose_name = "Asset Field"
+        verbose_name_plural = "Asset Fields"
+
+    def __str__(self):
+        return f"{self.category.name} → {self.label}"
+
+    def as_field_dict(self):
+        """Returns a dict compatible with the existing category_fields format,
+        so any consumer of get_category_fields() works without changes."""
+        d = {
+            "name": self.key,
+            "label": self.label,
+            "type": self.field_type,
+            "width": self.width,
+            "required": self.required,
+            "placeholder": self.placeholder,
+            "help_text": self.help_text,
+            "show_in_list": self.show_in_list,
+            "show_in_detail": self.show_in_detail,
+            "show_in_add": self.show_in_add,
+            "show_in_edit": self.show_in_edit,
+        }
+        if self.field_type == "select":
+            d["options"] = list(
+                self.options.filter(is_active=True)
+                    .order_by("display_order")
+                    .values_list("label", flat=True)
+            )
+        return d
+
+
+class AssetFieldOption(models.Model):
+    """
+    One selectable option for a Dropdown (select) AssetField.
+    Options are soft-deleted (is_active=False) — never hard-deleted,
+    so existing asset records that stored an option value are not silently
+    corrupted when an option is later removed from the list.
+    """
+    field = models.ForeignKey(
+        AssetField, on_delete=models.CASCADE, related_name="options"
+    )
+    label = models.CharField(max_length=200)
+    value = models.CharField(
+        max_length=200,
+        help_text="The value stored in Asset.extra_details. Defaults to label if left blank.",
+    )
+    display_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["display_order", "id"]
+
+    def save(self, *args, **kwargs):
+        if not self.value:
+            self.value = self.label
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.field.label} → {self.label}"
+
+
+class ConfigAuditLog(models.Model):
+    """
+    Audit trail for all Super Admin configuration changes: category
+    renames, field creates/edits/deactivations, option changes.
+    Asset data changes are tracked separately by AssetHistory.
+    """
+    ACTION_CHOICES = [
+        ("create",     "Create"),
+        ("update",     "Update"),
+        ("deactivate", "Deactivate"),
+        ("delete",     "Delete"),
+    ]
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="+",
+    )
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    model_name = models.CharField(max_length=50)   # 'AssetCategory' | 'AssetField' | 'AssetFieldOption'
+    object_id = models.IntegerField(null=True, blank=True)
+    object_repr = models.CharField(max_length=255)
+    diff = models.TextField(blank=True)             # JSON: {field: [old, new], ...}
+
+    class Meta:
+        ordering = ["-changed_at"]
+        verbose_name = "Config Audit Log"
+        verbose_name_plural = "Config Audit Logs"
+
+    def __str__(self):
+        return f"{self.action} {self.model_name} — {self.object_repr}"
+
+# ---------------------------------------------------------------------------
+# Append this block to the end of assets/models.py
+# ---------------------------------------------------------------------------
+
+
+class Workstation(models.Model):
+    """
+    The dedicated Workstation module's own record. One row per legacy
+    Workstation Asset (OneToOne — the Asset row keeps owning asset_tag,
+    branch, status, is_active, and AssetHistory exactly as it does today;
+    nothing about Asset changes). Workstation itself never appears as an
+    AssetCategory anywhere in the UI — see WORKSTATION_CATEGORY_NAME /
+    is_workstation_category in views.py, which still hides the underlying
+    AssetCategory("Workstation") row that Asset.category (a required FK)
+    needs to keep pointing at.
+
+    All of Workstation's own fields — including its relationships to CPU /
+    Monitor / Keyboard / Mouse / UPS / Employee assets — are admin
+    configurable through the dedicated Workstation Field Builder
+    (WorkstationField below), so they live here in extra_details exactly
+    the way Asset.extra_details works for every normal category. There are
+    no hardcoded relationship columns on this model; a "Lookup" WorkstationField
+    is what makes a given extra_details key mean "this is a reference to
+    another asset" (see relations.py's get_workstation_forward_relationships).
+    """
+    asset = models.OneToOneField(
+        Asset, on_delete=models.PROTECT, related_name="workstation_profile",
+        limit_choices_to={"category__name__iexact": "workstation"},
+        help_text="The underlying Workstation Asset row (asset_tag, branch, "
+                   "status, audit history all live there, unchanged).",
+    )
+    extra_details = models.JSONField(
+        default=dict, blank=True,
+        help_text="All Workstation Field Builder values, keyed by WorkstationField.key "
+                   "— including Lookup fields, which store the linked asset(s)' "
+                   "asset_tag(s), same convention as Asset.extra_details.",
+    )
+    unresolved = models.JSONField(
+        default=dict, blank=True,
+        help_text="Migration-time bookkeeping only: Lookup tokens from the legacy "
+                   "data that didn't resolve to a real Asset (blank / no match), "
+                   "kept here instead of silently dropped. Not shown on any form.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Workstation"
+        verbose_name_plural = "Workstations"
+
+    def __str__(self):
+        return f"Workstation: {self.asset.asset_tag}"
+
+
+class WorkstationField(models.Model):
+    """
+    One configurable field on the Workstation module — the Workstation
+    equivalent of AssetField, but not scoped to any AssetCategory (there's
+    only ever one Workstation module, not many categories), and with one
+    extra field_type: "lookup", for a relationship to another asset
+    (CPU / Monitor / Keyboard / Mouse / UPS / Employee, or any future one).
+
+    `key` is auto-generated on creation and IMMUTABLE afterwards — same
+    rule as AssetField.key, for the same reason (it's the key stored in
+    Workstation.extra_details; renaming it would orphan existing data).
+    """
+    FIELD_TYPES = [
+        ("text",     "Single Line Text"),
+        ("textarea", "Multi-Line Text"),
+        ("select",   "Dropdown"),
+        ("number",   "Number"),
+        ("date",     "Date"),
+        ("email",    "Email"),
+        ("url",      "URL"),
+        ("lookup",   "Lookup (link to another asset)"),
+    ]
+    WIDTH_CHOICES = [(6, "Half Width (col-6)"), (12, "Full Width (col-12)")]
+
+    label = models.CharField(max_length=150)
+    key = models.CharField(
+        max_length=100, unique=True,
+        help_text="Stable internal key stored in Workstation.extra_details. "
+                   "Auto-generated on creation; immutable afterwards.",
+    )
+    field_type = models.CharField(max_length=20, choices=FIELD_TYPES, default="text")
+    width = models.IntegerField(default=6, choices=WIDTH_CHOICES)
+    required = models.BooleanField(default=False)
+    placeholder = models.CharField(max_length=200, blank=True)
+    help_text = models.CharField(max_length=300, blank=True)
+    default_value = models.CharField(max_length=200, blank=True)
+    show_in_list = models.BooleanField(default=True)
+    show_in_detail = models.BooleanField(default=True)
+    show_in_add = models.BooleanField(default=True)
+    show_in_edit = models.BooleanField(default=True)
+    display_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    # Only meaningful when field_type == "lookup":
+    lookup_category = models.CharField(
+        max_length=100, blank=True,
+        help_text="AssetCategory name this field searches against, e.g. "
+                   "'CPU / System Unit', 'Monitor', 'Employee'. Required for "
+                   "Lookup fields — the same searchable-combo-box behaviour "
+                   "Workstation's CPU/Monitor/etc. fields already have today.",
+    )
+    lookup_multi = models.BooleanField(
+        default=False,
+        help_text="Allow linking more than one asset (e.g. multiple Monitors "
+                   "or UPS units on one workstation).",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_order", "id"]
+        verbose_name = "Workstation Field"
+        verbose_name_plural = "Workstation Fields"
+
+    def __str__(self):
+        return f"Workstation → {self.label}"
+
+    def as_field_dict(self):
+        d = {
+            "name": self.key,
+            "label": self.label,
+            "type": self.field_type,
+            "width": self.width,
+            "required": self.required,
+            "placeholder": self.placeholder,
+            "help_text": self.help_text,
+            "show_in_list": self.show_in_list,
+            "show_in_detail": self.show_in_detail,
+            "show_in_add": self.show_in_add,
+            "show_in_edit": self.show_in_edit,
+            "lookup_category": self.lookup_category,
+            "lookup_multi": self.lookup_multi,
+        }
+        if self.field_type == "select":
+            d["options"] = list(
+                self.options.filter(is_active=True)
+                    .order_by("display_order")
+                    .values_list("label", flat=True)
+            )
+        return d
+
+
+class WorkstationFieldOption(models.Model):
+    """One selectable option for a Dropdown WorkstationField. Soft-deleted
+    only, same as AssetFieldOption, so existing Workstation records that
+    stored an option value are never silently corrupted."""
+    field = models.ForeignKey(
+        WorkstationField, on_delete=models.CASCADE, related_name="options"
+    )
+    label = models.CharField(max_length=200)
+    value = models.CharField(
+        max_length=200,
+        help_text="The value stored in Workstation.extra_details. Defaults to label if left blank.",
+    )
+    display_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["display_order", "id"]
+
+    def save(self, *args, **kwargs):
+        if not self.value:
+            self.value = self.label
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.field.label} → {self.label}"
+
+
+class SiteSetting(models.Model):
+    """Small key/value store for Super Admin display settings
+    (e.g. the Workstation module's display name)."""
+    key = models.CharField(max_length=100, unique=True)
+    value = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        return f"{self.key} = {self.value}"

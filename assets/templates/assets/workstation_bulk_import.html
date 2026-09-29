@@ -1,0 +1,139 @@
+{% extends "assets/base.html" %}
+{% block title %}Bulk Import Workstations - Asset Register{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <a href="{% url 'assets:workstation_list' %}" class="btn-back">
+            <i class="bi bi-arrow-left"></i> Back to Workstation
+        </a>
+        <h3 class="fw-bold text-secondary mt-1">Bulk Import Workstations</h3>
+    </div>
+</div>
+
+{% if file_error %}
+<div class="alert alert-danger mx-auto" style="max-width: 720px;">
+    <div class="d-flex align-items-start gap-2">
+        <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+        <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">We couldn't read that file</div>
+            <div class="mb-2">{{ file_error }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if not results %}
+<div class="card card-stat p-4 mx-auto" style="max-width: 720px;">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label class="form-label fw-semibold">Branch</label>
+        <select name="branch" class="form-select mb-3" required>
+            <option value="">Select a branch…</option>
+            {% for b in branches %}
+            <option value="{{ b.id }}" {% if selected_import_branch_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+        </select>
+        <div class="form-text mb-3 mt-n2">
+            Used for any row that doesn't have its own recognized <strong>Branch</strong> column value.
+        </div>
+
+        <label class="form-label fw-semibold">Choose file (.csv, .txt, or .xlsx)</label>
+        <input type="file" name="import_file" accept=".csv,.txt,.xlsx,.xls" class="form-control mb-3" required>
+        <button type="submit" class="btn btn-swift">
+            <i class="bi bi-search"></i> Validate File
+        </button>
+    </form>
+
+    <hr class="my-4">
+    <div class="small text-muted">
+        <div class="fw-semibold mb-2">This is a single flat sheet — one row per Workstation:</div>
+        <ul class="mb-3 ps-3">
+            <li><strong>Workstation ID</strong> (or "Asset Tag" / "Tag") is required and must be unique — if no matching column is found, the sheet's first column is used instead.</li>
+            <li><strong>Status</strong> accepts values like Working, Not Working, Idle, Scrap, Missing, Under Service (defaults to Working if blank).</li>
+            <li><strong>Branch</strong> is optional per row — must match an existing branch name exactly (not case-sensitive); otherwise the branch chosen above is used.</li>
+            <li><strong>Notes</strong> is optional free text.</li>
+            <li>Every other column is matched against the fields configured in the <a href="{% url 'assets:workstation_builder' %}">Workstation Field Builder</a> (by label, case-insensitive). An unmatched column is still kept, under its own original header text.</li>
+            <li>This creates <strong>new</strong> Workstations only — to edit an existing one, use its Edit page.</li>
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+{% if results %}
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card card-stat p-3">
+            <div class="text-muted small">Total Rows</div>
+            <div class="stat-number">{{ summary.total }}</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card card-stat p-3">
+            <div class="text-muted small">Valid</div>
+            <div class="stat-number text-success">{{ summary.valid }}</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card card-stat p-3">
+            <div class="text-muted small">Invalid</div>
+            <div class="stat-number text-danger">{{ summary.invalid }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card card-stat mb-4">
+    <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    {% for header in results.0.template_headers %}
+                    <th>{{ header|default:"(unlabeled)" }}</th>
+                    {% endfor %}
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in results %}
+                <tr class="{% if not row.is_valid %}table-danger{% endif %}">
+                    <td>{{ row.row_number }}</td>
+                    {% for col in row.template_row %}
+                    <td>{{ col.value }}</td>
+                    {% endfor %}
+                    <td>
+                        {% if row.is_valid %}
+                        <span class="badge bg-success">Valid</span>
+                        {% else %}
+                        <span class="badge bg-danger">Invalid</span>
+                        <div class="small text-danger mt-1">
+                            {% for err in row.errors %}{{ err }}{% if not forloop.last %}; {% endif %}{% endfor %}
+                        </div>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="d-flex gap-2">
+    {% if summary.valid > 0 %}
+    <form method="post" action="{% url 'assets:workstation_bulk_import_confirm' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-swift">
+            <i class="bi bi-check-lg"></i> Confirm &amp; Import {{ summary.valid }} Workstation{{ summary.valid|pluralize }}
+        </button>
+    </form>
+    {% endif %}
+    <a href="{% url 'assets:workstation_bulk_import' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-repeat"></i> Upload a Different File
+    </a>
+</div>
+<div class="small text-muted mt-2">
+    Only the {{ summary.valid }} valid row(s) above will be added. Fix the invalid rows in your file and re-upload to include them too.
+</div>
+{% endif %}
+
+{% endblock %}

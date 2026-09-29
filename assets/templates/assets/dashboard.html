@@ -66,11 +66,37 @@
 </div>
 {% endif %}
 
+{% if workstation_summary %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="section-title mb-0">{{ ws_label }}</h5>
+</div>
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <a href="{% url 'assets:workstation_list' %}" class="category-link">
+            <div class="card card-stat hoverable p-3 h-100">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="fw-semibold">{{ ws_label }}</div>
+                        <div class="stat-number">{{ workstation_summary.total }}</div>
+                        {% if workstation_summary.not_working %}
+                        <span class="badge bg-danger mt-1">{{ workstation_summary.not_working }} need attention</span>
+                        {% endif %}
+                    </div>
+                    <div class="category-icon-wrap"><i class="bi bi-pc-display"></i></div>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+{% endif %}
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="section-title mb-0">Asset Categories</h5>
+    {% if is_super_admin %}
     <a href="{% url 'assets:category_create' %}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-plus-lg"></i> Add Category
     </a>
+    {% endif %}
 </div>
 <div class="row g-3 mb-4">
     {% for cat in main_categories %}

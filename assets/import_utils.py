@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from .models import Asset, AssetCategory
-from .category_fields import SENSITIVE_FIELD_NAMES, _is_sensitive_field
+from .category_fields import SENSITIVE_FIELD_NAMES, _is_sensitive_field, is_category_db_configured, get_category_fields
 from .sheet_templates import get_sheet_template, diff_headers as _diff_template_headers
 
 MAX_IMPORT_ROWS = 20000
@@ -146,7 +146,8 @@ SHEET_HEADER_OVERRIDES = {
 # is real — so those sheets still need ONE of the duplicate columns
 # renamed by hand before upload (e.g. the second "Status" -> "Notes").
 
-DATE_FORMATS = ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d-%b-%Y", "%d %b %Y"]
+DATE_FORMATS = ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d-%b-%Y", "%d %b %Y",
+                "%d.%m.%Y", "%d.%m.%y", "%d/%m/%y", "%d-%m-%y"]
 
 TRUE_WORDS = {"true", "1", "yes", "y", "active"}
 FALSE_WORDS = {"false", "0", "no", "n", "inactive", "retired"}
@@ -202,13 +203,36 @@ def _is_xls_bytes(raw_bytes):
     return raw_bytes[:8] == XLS_MAGIC
 
 
-def _read_xls_bytes(raw_bytes, sheet_index=0):
+def _find_sheet_name(sheet_names, wanted):
+    """Case/whitespace-insensitive sheet-name lookup. Returns the real name or None."""
+    wanted = str(wanted or "").strip().lower()
+    for name in sheet_names:
+        if str(name).strip().lower() == wanted:
+            return name
+    return None
+
+
+def _read_xls_bytes(raw_bytes, sheet_index=0, sheet_name=None):
     """Reads an old .xls file from raw bytes using xlrd.
-    Returns (header_row, data_rows) from the specified sheet index.
+    Returns (header_row, data_rows) from the specified sheet index, or from
+    the sheet called `sheet_name` when given (falls back to `sheet_index`
+    only if the workbook has a single sheet).
     """
     import xlrd
     wb = xlrd.open_workbook(file_contents=raw_bytes)
-    ws = wb.sheet_by_index(sheet_index)
+    if sheet_name:
+        match = _find_sheet_name(wb.sheet_names(), sheet_name)
+        if match:
+            ws = wb.sheet_by_name(match)
+        elif wb.nsheets > 1:
+            raise ImportFileError(
+                f"No sheet named '{sheet_name}' in this file. "
+                f"Sheets found: {', '.join(wb.sheet_names())}."
+            )
+        else:
+            ws = wb.sheet_by_index(sheet_index)
+    else:
+        ws = wb.sheet_by_index(sheet_index)
     rows = []
     for row_idx in range(ws.nrows):
         row = []
@@ -258,10 +282,17 @@ def _read_xls_all_sheets(raw_bytes):
     return result
 
 
-def parse_uploaded_file(uploaded_file):
+def parse_uploaded_file(uploaded_file, preferred_sheet=None):
     """Returns (header_row: list[str], data_rows: list[list]) from a
     csv/txt/xlsx/xls file. Old .xls files are handled automatically even if
-    they are misnamed as .csv or .xlsx."""
+    they are misnamed as .csv or .xlsx.
+
+    preferred_sheet: for multi-sheet Excel files, read the sheet with this
+    name (case-insensitive) instead of whichever sheet happened to be active
+    when the workbook was saved. If the workbook has several sheets and none
+    matches, an ImportFileError lists the sheets found. Ignored for csv/txt
+    and for single-sheet workbooks.
+    """
     filename = (uploaded_file.name or "").lower()
     raw_bytes = read_upload_bytes(uploaded_file)
 
@@ -269,7 +300,9 @@ def parse_uploaded_file(uploaded_file):
     # many users export from Excel and the file is still .xls inside.
     if _is_xls_bytes(raw_bytes):
         try:
-            rows = _read_xls_bytes(raw_bytes, sheet_index=0)
+            rows = _read_xls_bytes(raw_bytes, sheet_index=0, sheet_name=preferred_sheet)
+        except ImportFileError:
+            raise
         except Exception as exc:
             raise ImportFileError(f"Couldn't open the Excel file: {exc}")
         if not rows:
@@ -282,6 +315,15 @@ def parse_uploaded_file(uploaded_file):
         except Exception as exc:
             raise ImportFileError(f"Couldn't open the Excel file: {exc}")
         ws = wb.active
+        if preferred_sheet:
+            match = _find_sheet_name(wb.sheetnames, preferred_sheet)
+            if match:
+                ws = wb[match]
+            elif len(wb.sheetnames) > 1:
+                raise ImportFileError(
+                    f"No sheet named '{preferred_sheet}' in this file. "
+                    f"Sheets found: {', '.join(wb.sheetnames)}."
+                )
         rows = list(ws.iter_rows(values_only=True))
         if not rows:
             raise ImportFileError("The Excel file is empty.")
@@ -681,7 +723,7 @@ def _parse_inside_cupboard_sheet_rows(rows, existing_tags=None, seen_tags=None):
     return header, data_rows
 
 
-def parse_uploaded_workbook_sheets(uploaded_file):
+def parse_uploaded_workbook_sheets(uploaded_file, workstation_out=None):
     """Multi-sheet import: each sheet TAB is one asset category (e.g. a tab
     named 'Monitor' imports into the Monitor category), so every sheet can
     have its own column layout — no common schema required across sheets.
@@ -694,6 +736,12 @@ def parse_uploaded_workbook_sheets(uploaded_file):
          silently dropped — matching how the dashboard already buckets
          low-importance categories (Bluetooth Device, Biometric Device,
          Networking Equipment, etc.) under "Other Asset".
+
+    workstation_out: optional dict. When given, a tab named 'Workstation' is
+      NOT skipped: its header and data rows are stored in
+      workstation_out["header"] / workstation_out["rows"] so the caller can
+      validate them with validate_workstation_rows() and import workstations
+      in the same upload as the categories.
 
     Returns (sheets, skipped_sheets, rerouted_sheets):
       sheets: list of (sheet_name, header_row, data_rows, category) for every
@@ -792,6 +840,21 @@ def parse_uploaded_workbook_sheets(uploaded_file):
                 alias_target = SHEET_NAME_ALIASES.get(norm_name)
                 if alias_target:
                     cat = categories_by_norm_name.get(_normalize_header(alias_target))
+        if norm_name == "workstation" and workstation_out is not None:
+            workstation_out["header"] = header
+            workstation_out["rows"] = data_rows
+            continue
+        if (cat is not None and cat.name.strip().lower() == "workstation") or norm_name == "workstation":
+            # Workstation is its own module now, not a normal Asset Category
+            # — a generic multi-sheet upload must never create new Asset
+            # rows under it. The 45 existing legacy Workstation records are
+            # untouched; this only blocks NEW ones from sneaking in via a
+            # sheet tab literally named "Workstation".
+            skipped_sheets.append(
+                (sheet_name, "Workstation is managed as its own module, not a normal "
+                             "Asset Category — this sheet was not imported")
+            )
+            continue
         used_fallback = False
         if not cat:
             cat = fallback_cat
@@ -819,6 +882,15 @@ def parse_uploaded_workbook_sheets(uploaded_file):
             )
 
     if not sheets:
+        if skipped_sheets and all(
+            reason.lower().startswith("workstation") for _sname, reason in skipped_sheets
+        ):
+            raise ImportFileError(
+                "This file only contains a 'Workstation' sheet, which isn't "
+                "imported here — Workstation is managed as its own module, "
+                "not a normal Asset Category. Remove that sheet (or add "
+                "other category sheets alongside it) and re-upload."
+            )
         raise ImportFileError(
             "No sheet tab names matched an existing asset category, and the "
             "'Other Asset' catch-all category is missing. Add that category "
@@ -831,6 +903,36 @@ def parse_uploaded_workbook_sheets(uploaded_file):
         )
 
     return sheets, skipped_sheets, rerouted_sheets
+
+
+def _diff_live_fields(category, header_row, col_to_field):
+    """Same purpose as sheet_templates.diff_headers (missing / unexpected
+    header notices), but compares against this category's LIVE active
+    AssetField labels instead of the frozen original workbook headers.
+    Used once a category has been configured in the Category Builder, so a
+    field that's been renamed, added, or deactivated is what an admin gets
+    warned about on upload — never a stale legacy header from the original
+    workbook.
+
+    missing: labels of ACTIVE REQUIRED fields not found in the upload
+      (unlike the legacy diff, optional live fields are never flagged as
+      "missing" just because one particular upload happens to omit them
+      — that's normal for a dynamic, admin-configurable field set).
+    unexpected: uploaded columns that don't match any active field label
+      (columns already claimed by the common Asset columns — Asset Tag,
+      Status, Notes, etc. — are excluded via get_extra_columns/col_to_field,
+      same as everywhere else this data is used).
+    """
+    fields = get_category_fields(category)
+    field_norms = {_normalize_header(f["label"]) for f in fields}
+    extra_cols = get_extra_columns(header_row, col_to_field)
+    uploaded_norms = {_normalize_header(h) for h in extra_cols.values()}
+    missing = [
+        f["label"] for f in fields
+        if f.get("required") and _normalize_header(f["label"]) not in uploaded_norms
+    ]
+    unexpected = [h for h in extra_cols.values() if _normalize_header(h) not in field_norms]
+    return missing, unexpected
 
 
 def validate_workbook_sheets(sheets):
@@ -888,7 +990,13 @@ def validate_workbook_sheets(sheets):
 
         base_name_for_template = re.sub(r"\s*\(item \d+\)$", "", sheet_name)
         sheet_template = get_sheet_template(base_name_for_template)
-        if sheet_template is not None and sheet_name == base_name_for_template:
+        if is_category_db_configured(category):
+            # DB configuration (Category Builder) is the source of truth —
+            # same priority rule export/sample-template/forms already use.
+            missing, unexpected = _diff_live_fields(category, header_row, col_to_field)
+            if missing or unexpected:
+                template_notices.append((sheet_name, missing, unexpected))
+        elif sheet_template is not None and sheet_name == base_name_for_template:
             missing, unexpected = _diff_template_headers(base_name_for_template, header_row)
             if missing or unexpected:
                 template_notices.append((sheet_name, missing, unexpected))
@@ -1217,6 +1325,8 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
     if employee_placeholder_counter is None:
         employee_placeholder_counter = [1]
 
+    category_db_fields = {}
+
     sheet_tag_aliases = {}
     results = []
     for i, raw_row in enumerate(data_rows, start=1):
@@ -1265,7 +1375,15 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 errors.append("Category is required")
             else:
                 cat = categories_by_name.get(category_name.lower())
-                if not cat:
+                if cat is not None and cat.name.strip().lower() == "workstation":
+                    # Workstation is its own module, not a normal Asset
+                    # Category — block new rows from being created under it
+                    # via this generic single-sheet/CSV import path too.
+                    errors.append(
+                        "Category 'Workstation' can't be used here — Workstation "
+                        "is managed as its own module, not a normal Asset Category"
+                    )
+                elif not cat:
                     errors.append(f"Unknown category '{category_name}'")
                 else:
                     fields["category"] = cat.id
@@ -1521,7 +1639,96 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         template_row_display = None
         template_headers_list = None
 
-        if sheet_template is not None:
+        row_cat_id = fields.get("category")
+        db_fields = None
+        is_db_configured = False
+        
+        if row_cat_id:
+            if row_cat_id not in category_db_fields:
+                from .models import AssetField, AssetCategory
+                cat_obj = AssetCategory.objects.get(pk=row_cat_id)
+                if AssetField.objects.filter(category=cat_obj).exists():
+                    fields_qs = AssetField.objects.filter(category=cat_obj, is_active=True).prefetch_related('options')
+                    category_db_fields[row_cat_id] = list(fields_qs)
+                else:
+                    category_db_fields[row_cat_id] = None
+            db_fields = category_db_fields[row_cat_id]
+            is_db_configured = db_fields is not None
+
+        if is_db_configured:
+            label_to_field = {_normalize_header(f.label): f for f in db_fields}
+            
+            for idx, header_text in extra_cols.items():
+                if _is_sensitive_field(header_text):
+                    skipped_sensitive.append(header_text)
+                    continue
+                
+                value = _cell_text(raw_row[idx] if idx < len(raw_row) else "")
+                norm_header = _normalize_header(header_text)
+                
+                if norm_header in label_to_field:
+                    f = label_to_field[norm_header]
+                    if value == "" and f.required:
+                        errors.append(f"{f.label} is required")
+                    elif value != "":
+                        if f.field_type == 'select':
+                            opts = {opt.value.lower(): opt.value for opt in f.options.all() if opt.is_active}
+                            opt_labels = {opt.label.lower(): opt.value for opt in f.options.all() if opt.is_active}
+                            val_lower = value.lower()
+                            if val_lower in opts:
+                                extra_details[f.key] = opts[val_lower]
+                            elif val_lower in opt_labels:
+                                extra_details[f.key] = opt_labels[val_lower]
+                            else:
+                                errors.append(f"Invalid option '{value}' for {f.label}")
+                        elif f.field_type == 'number':
+                            try:
+                                float(value)
+                                extra_details[f.key] = value
+                            except ValueError:
+                                errors.append(f"{f.label} must be a number")
+                        elif f.field_type == 'date':
+                            parsed_d, err_d = _parse_date_cell(value)
+                            if err_d:
+                                errors.append(f"Invalid date in {f.label}: {err_d}")
+                            else:
+                                extra_details[f.key] = parsed_d.isoformat() if parsed_d else value
+                        else:
+                            extra_details[f.key] = value
+                else:
+                    if value != "":
+                        extra_details[header_text] = value
+            
+            for f in db_fields:
+                if f.required and f.key not in extra_details:
+                    errors.append(f"{f.label} is required")
+
+            # Build a real per-column preview (Asset Tag / Name / Status
+            # plus every active Category Builder field, in their configured
+            # order) instead of leaving template_headers_list as None here.
+            # Previously a DB-configured category ALWAYS fell through to the
+            # generic 5-column table in the preview — even when it had a
+            # perfectly good set of named fields — because this branch never
+            # populated template_headers_list/template_row_display the way
+            # the sheet_template branch below does. The saved data was never
+            # affected, only what admins could see before confirming.
+            template_headers_list = ["Asset Tag", "Name", "Status"] + [f.label for f in db_fields]
+            template_row_display = [
+                {"header": "Asset Tag", "value": raw_display.get("AssetTag", "")},
+                {"header": "Name", "value": raw_display.get("Name", "")},
+                {"header": "Status", "value": raw_display.get("Status", "")},
+            ]
+            for f in db_fields:
+                if f.label in skipped_sensitive:
+                    display_value = "•••• (hidden)"
+                elif f.field_type == "select" and extra_details.get(f.key):
+                    opt = next((o for o in f.options.all() if o.value == extra_details[f.key]), None)
+                    display_value = opt.label if opt else extra_details[f.key]
+                else:
+                    display_value = extra_details.get(f.key, "")
+                template_row_display.append({"header": f.label, "value": display_value})
+
+        elif sheet_template is not None:
             col_map = orig_col_indices if orig_col_indices is not None else list(range(len(header_row)))
             tmpl_by_index = {c["col_index"]: c for c in sheet_template}
             # Only the columns THIS call actually has — for a block-split
@@ -1564,6 +1771,26 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         # would show up as the capacity in the legacy-fallback display.
         if (category_display_name or "").strip().lower() == "air conditioner":
             capacity = extra_details.get("Capacity / Location", "")
+            # Legacy "Others" sheet layout (ID / Device Type / Device Name /
+            # Status / Details): its "Status" column holds the capacity +
+            # location ("1.5 TON, ADMIN ROOM") and "Details" holds the service
+            # note ("serviced on 28/2/2020"). Use them instead of dropping them.
+            raw_status_text = (extra_details.get("Status") or "").strip()
+            if not capacity and raw_status_text and not STATUS_LOOKUP.get(_normalize_header(raw_status_text)):
+                capacity = raw_status_text
+                if fields.get("status") == "other":
+                    fields["status"] = "working"
+                note_prefix = f"Status note: {raw_status_text}"
+                if fields.get("notes"):
+                    fields["notes"] = fields["notes"].replace(note_prefix, "").strip()
+            details_text = (extra_details.get("Details") or "").strip()
+            if details_text and not fields.get("last_service_date"):
+                parsed_service, _err = _parse_date_cell(details_text)
+                if parsed_service:
+                    fields["last_service_date"] = parsed_service
+                else:
+                    existing_note = fields.get("notes", "")
+                    fields["notes"] = f"{existing_note} {details_text}".strip()
             extra_details = {"capacity_location": capacity} if capacity else {}
 
         fields["extra_details"] = extra_details
@@ -1651,6 +1878,272 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                         ]
                 seen_employee_names[emp_name_key] = (i, this_result)
 
+    return results
+
+
+def _workstation_status_lookup():
+    """Normalized free-text -> WORKSTATION_STATUS_CHOICES key. Kept in one
+    place so the bulk importer accepts the same spellings a human would
+    reasonably type/paste from a legacy sheet."""
+    return {
+        "working": "working", "active": "working", "ok": "working", "good": "working",
+        "not working": "not_working", "not_working": "not_working", "broken": "not_working",
+        "faulty": "not_working",
+        "idle": "idle", "in cupboard": "idle", "idle / in cupboard": "idle", "spare": "idle",
+        "scrap": "scrap", "destroyed": "scrap", "scrap / destroyed": "scrap",
+        "missing": "missing", "lost": "missing",
+        "service": "service", "under service": "service", "in service": "service",
+    }
+
+
+def resolve_lookup_value(value, multi, target_category):
+    """Resolve a lookup cell (e.g. 'M056, M063') to real asset tags.
+    Returns (stored_value, unmatched_tokens): a list of tags when multi, else
+    a single tag or ''. Same rules as the migrate_workstation_data command."""
+    from .relations import _clean_ref_tokens, resolve_asset_reference
+    tokens = _clean_ref_tokens(value) if multi else [str(value).strip()]
+    matched, unmatched = [], []
+    for tok in tokens:
+        found = resolve_asset_reference(tok, target_category or None)
+        if found:
+            if found.asset_tag not in matched:
+                matched.append(found.asset_tag)
+        else:
+            unmatched.append(tok)
+    return (matched if multi else (matched[0] if matched else "")), unmatched
+
+
+def resolve_pending_workstation_lookups(pending):
+    """Resolve lookups that validate_workstation_rows(resolve_lookups=False)
+    deferred. Call AFTER the file's other sheets have been saved, so links to
+    assets created by the same upload resolve. Returns (extra_updates, unresolved)."""
+    updates, unresolved = {}, {}
+    for key, spec in (pending or {}).items():
+        stored, unmatched = resolve_lookup_value(spec["raw"], spec["multi"], spec["category"])
+        updates[key] = stored
+        if unmatched:
+            unresolved[key] = unmatched
+    return updates, unresolved
+
+
+def validate_workstation_rows(header_row, data_rows, workstation_fields,
+                              resolve_lookups=True, reserved_tags=None):
+    """Validates rows for the dedicated Workstation bulk-import page.
+
+    Workstation is its own module, not a normal multi-tab Asset Category
+    import (see parse_uploaded_workbook_sheets, which deliberately skips a
+    sheet tab named 'Workstation'), so this is a separate, single-flat-sheet
+    path: one Workstation ID per row, plus whatever Workstation Field
+    Builder fields are configured. Column matching is by header TEXT, not
+    position:
+      - 'Workstation ID' / 'Asset Tag' / 'Tag' -> the unique tag (falls back
+        to the sheet's first column if none of those headers are present)
+      - 'Status' -> matched against WORKSTATION_STATUS_CHOICES, defaults to
+        'working' if blank or unrecognized
+      - 'Branch' -> optional per-row branch name; left unset here when
+        blank or unmatched, so the caller can fall back to whichever single
+        branch was chosen on the upload form
+      - 'Notes' -> optional free text
+      - every other column is matched (case-insensitively) against an
+        active WorkstationField's label and stored in extra_details under
+        that field's key, exactly like a normal Asset category's extra
+        fields; an unmatched column is kept under its own original header
+        text instead of being silently dropped.
+
+    workstation_fields: active WorkstationField rows (options prefetched),
+    fetched once by the caller.
+
+    resolve_lookups=False (combined multi-sheet upload): lookup cells are NOT
+    resolved now, because the CPU/Monitor/UPS... assets they point to may be
+    created by the same upload. The raw values are kept in
+    fields["pending_lookups"] and resolved at confirm time with
+    resolve_pending_workstation_lookups(). reserved_tags: lower-cased asset
+    tags used by the file's other sheets, so a clash is reported in preview.
+
+    Returns a list of row-result dicts shaped like the Asset importer's
+    (row_number, errors, is_valid, fields, template_headers, template_row),
+    so the same kind of per-column preview table can be reused instead of
+    falling back to a generic one.
+    """
+    from .models import Branch
+
+    norm_headers = [_normalize_header(h) for h in header_row]
+
+    def _find_col(*aliases):
+        wanted = {_normalize_header(a) for a in aliases}
+        for idx, h in enumerate(norm_headers):
+            if h in wanted:
+                return idx
+        return None
+
+    tag_idx = _find_col("workstation id", "asset tag", "workstation", "tag")
+    if tag_idx is None:
+        # Previously this fell back to the first column, which let any sheet
+        # (e.g. UPS) be imported as workstations. Refuse instead.
+        raise ImportFileError(
+            "This doesn't look like a Workstation sheet: no 'Workstation ID' "
+            "(or 'Asset Tag' / 'Tag') column was found. Upload a file whose "
+            "first sheet is the Workstation list, or name the tab 'Workstation'."
+        )
+    status_idx = _find_col("status", "current status")
+    branch_idx = _find_col("branch")
+    notes_idx = _find_col("notes", "remark", "remarks")
+
+    label_to_field = {_normalize_header(f.label): f for f in workstation_fields}
+    consumed_idx = {i for i in (tag_idx, status_idx, branch_idx, notes_idx) if i is not None}
+
+    status_lookup = _workstation_status_lookup()
+    existing_tags = {t.lower() for t in Asset.objects.values_list("asset_tag", flat=True)}
+    branches_by_norm = {_normalize_header(b.name): b for b in Branch.objects.filter(status=True)}
+    seen_tags_in_file = set()
+
+    template_headers_list = (
+        ["Workstation ID", "Status", "Branch", "Notes"] + [f.label for f in workstation_fields]
+    )
+
+    def _row_tag(raw_row):
+        t = _cell_text(raw_row[tag_idx]) if tag_idx is not None and tag_idx < len(raw_row) else ""
+        if not t and raw_row:
+            t = _cell_text(raw_row[0])
+        return t
+
+    # Same rule as the Employee_List sheet: when a Workstation ID appears more
+    # than once in the file, the LAST occurrence is the updated record and the
+    # earlier ones are superseded (shown as invalid, not imported).
+    last_row_for_tag = {}
+    for _i, _r in enumerate(data_rows, start=2):
+        if any(_cell_text(c) for c in _r):
+            _t = _row_tag(_r)
+            if _t:
+                last_row_for_tag[_t.lower()] = _i
+
+    results = []
+    for i, raw_row in enumerate(data_rows, start=2):  # row 1 is the header
+        if not any(_cell_text(c) for c in raw_row):
+            continue
+        errors = []
+        superseded_msg = None
+
+        tag = _row_tag(raw_row)
+        if not tag:
+            errors.append("Workstation ID is required")
+        tag_key = tag.lower()
+        if tag and reserved_tags and tag_key in reserved_tags:
+            errors.append(f"Asset tag '{tag}' is also used on another sheet in this file")
+        elif tag and tag_key in existing_tags:
+            errors.append(f"Asset tag '{tag}' already exists")
+        if tag and last_row_for_tag.get(tag_key) not in (None, i):
+            superseded_msg = (
+                f"Superseded by updated record (row {last_row_for_tag[tag_key]}) "
+                f"with Workstation ID '{tag}'"
+            )
+
+        status_text = _cell_text(raw_row[status_idx]) if status_idx is not None and status_idx < len(raw_row) else ""
+        status = status_lookup.get(_normalize_header(status_text), "working") if status_text else "working"
+
+        branch_text = _cell_text(raw_row[branch_idx]) if branch_idx is not None and branch_idx < len(raw_row) else ""
+        branch_obj = branches_by_norm.get(_normalize_header(branch_text)) if branch_text else None
+
+        notes = _cell_text(raw_row[notes_idx]) if notes_idx is not None and notes_idx < len(raw_row) else ""
+
+        extra_details = {}
+        unresolved = {}
+        pending_lookups = {}
+        new_options = {}
+        for idx, header_text in enumerate(header_row):
+            if idx in consumed_idx or not header_text:
+                continue
+            value = _cell_text(raw_row[idx]) if idx < len(raw_row) else ""
+            _nh = _normalize_header(header_text)
+            # Accept legacy headers like "CPU Number" / "UPS No." for the fields
+            # labelled "CPU" / "UPS" (exact label match still wins).
+            f = label_to_field.get(_nh) or label_to_field.get(re.sub(r"\s+(number|no)$", "", _nh))
+            if f:
+                if value == "" and f.required:
+                    errors.append(f"{f.label} is required")
+                elif value != "":
+                    if f.field_type == "lookup":
+                        # Resolve to real assets exactly like the
+                        # migrate_workstation_data command, so imported and
+                        # migrated workstations link the same way. Tokens
+                        # that match nothing go to `unresolved`, not lost.
+                        is_multi = getattr(f, "lookup_multi", False)
+                        target_cat = getattr(f, "lookup_category", "") or None
+                        if resolve_lookups:
+                            stored, unmatched = resolve_lookup_value(value, is_multi, target_cat)
+                            extra_details[f.key] = stored
+                            if unmatched:
+                                unresolved[f.key] = unmatched
+                        else:
+                            pending_lookups[f.key] = {
+                                "raw": value, "multi": bool(is_multi), "category": target_cat or "",
+                            }
+                    elif f.field_type == "select":
+                        opts_by_value = {o.value.lower(): o.value for o in f.options.all() if o.is_active}
+                        opts_by_label = {o.label.lower(): o.value for o in f.options.all() if o.is_active}
+                        val_lower = value.lower()
+                        if val_lower in opts_by_value:
+                            extra_details[f.key] = opts_by_value[val_lower]
+                        elif val_lower in opts_by_label:
+                            extra_details[f.key] = opts_by_label[val_lower]
+                        else:
+                            # New dropdown value (e.g. a new "Purposes"). Don't reject
+                            # the row: keep the value and add it to the field's
+                            # options when the import is confirmed.
+                            extra_details[f.key] = value
+                            new_options[f.key] = value
+                    elif f.field_type == "number":
+                        try:
+                            float(value)
+                            extra_details[f.key] = value
+                        except ValueError:
+                            errors.append(f"{f.label} must be a number")
+                    else:
+                        extra_details[f.key] = value
+            elif value != "":
+                extra_details[header_text] = value
+
+        if superseded_msg:
+            errors = [superseded_msg]
+
+        template_row_display = [
+            {"header": "Workstation ID", "value": tag},
+            {"header": "Status", "value": status_text or "Working"},
+            {"header": "Branch", "value": branch_text},
+            {"header": "Notes", "value": notes},
+        ]
+        for f in workstation_fields:
+            raw_val = extra_details.get(f.key, "")
+            display_val = ", ".join(raw_val) if isinstance(raw_val, list) else raw_val
+            # Lookup cells resolved later (combined upload) or not found in the
+            # register would otherwise preview as blank; show what the sheet says.
+            if f.key in new_options:
+                display_val = f"{display_val} (new option)"
+            if f.key in pending_lookups:
+                display_val = pending_lookups[f.key]["raw"]
+            elif f.key in unresolved:
+                nf = ", ".join(unresolved[f.key]) + " (not found)"
+                display_val = f"{display_val}, {nf}" if display_val else nf
+            template_row_display.append({"header": f.label, "value": display_val})
+
+        results.append({
+            "row_number": i,
+            "errors": errors,
+            "is_valid": not errors,
+            "fields": {
+                "_kind": "workstation",
+                "asset_tag": tag,
+                "status": status,
+                "notes": notes,
+                "branch_id": branch_obj.id if branch_obj else None,
+                "extra_details": extra_details,
+                "unresolved": unresolved,
+                "pending_lookups": pending_lookups,
+                "new_options": new_options,
+            },
+            "template_headers": template_headers_list,
+            "template_row": template_row_display,
+        })
     return results
 
 
