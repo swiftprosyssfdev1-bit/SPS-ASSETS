@@ -126,9 +126,9 @@
                 {% for asset in results %}
                     <tr>
                         <td>
-                            <span class="result-tag">{{ asset.asset_tag }}</span>
+                            <span class="result-tag">{{ asset.display_tag }}</span>
                         </td>
-                        <td>{{ asset.name }}</td>
+                        <td>{{ asset.display_name }}</td>
                         <td>
                             <a href="{% url 'assets:category_detail' asset.category_id %}"
                                class="text-decoration-none text-muted small">

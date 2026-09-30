@@ -27,8 +27,8 @@
                 {% for asset in assets %}
                 <tr>
                     <td>
-                        <a href="{% url 'assets:asset_update' asset.id %}" class="text-decoration-none">{{ asset.name }}</a>
-                        <div class="text-muted small">{{ asset.asset_tag }}</div>
+                        <a href="{% url 'assets:asset_update' asset.id %}" class="text-decoration-none">{{ asset.display_name }}</a>
+                        <div class="text-muted small">{{ asset.display_tag }}</div>
                     </td>
                     <td class="text-muted">{{ asset.category.name }}</td>
                     <td class="text-muted">{{ asset.branch.name|default:"—" }}</td>

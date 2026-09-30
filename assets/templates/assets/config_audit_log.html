@@ -4,7 +4,14 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3 class="fw-bold text-secondary">Configuration Audit Log</h3>
-    <a href="{% url 'assets:dashboard' %}" class="btn-back"><i class="bi bi-arrow-left"></i> Dashboard</a>
+    <div class="d-flex gap-2 align-items-center">
+        {% if logs and allow_clear_all %}
+        <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#clearAuditModal">
+            <i class="bi bi-trash me-1"></i>Clear All
+        </button>
+        {% endif %}
+        <a href="{% url 'assets:dashboard' %}" class="btn-back"><i class="bi bi-arrow-left"></i> Dashboard</a>
+    </div>
 </div>
 <div class="card card-stat">
     <div class="card-body p-0">
@@ -40,4 +47,29 @@
         {% endif %}
     </div>
 </div>
+{% if allow_clear_all %}
+<div class="modal fade" id="clearAuditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content border-danger">
+            <form method="post" action="{% url 'assets:config_audit_log_clear' %}">
+                {% csrf_token %}
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-shield-exclamation me-2"></i> Clear Configuration Audit Log</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger py-2 mb-3">This permanently deletes <strong>all</strong> configuration audit entries. This cannot be undone.</div>
+                    <label class="form-label fw-semibold">Enter your Superuser Password:</label>
+                    <input type="password" name="admin_password" class="form-control" autocomplete="current-password" required>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Confirm &amp; Clear</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}

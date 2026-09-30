@@ -25,6 +25,7 @@
 <div class="card card-stat p-4 mx-auto" style="max-width: 720px;">
 
     <form method="post" id="asset-form">
+    {% if form.non_field_errors %}<div class="alert alert-danger">{% for e in form.non_field_errors %}<div>{{ e }}</div>{% endfor %}</div>{% endif %}
 
         {% csrf_token %}
 
@@ -160,7 +161,7 @@
 
 
 
-            <div class="col-12">
+            <div class="col-12" id="field-wrap-notes">
 
                 <label class="form-label fw-semibold">Notes</label>
 
@@ -296,6 +297,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 '<div class="asset-combo-dropdown"></div></div></div>'
             );
         }
+        if (field.type === 'searchable_select') {
+            const val = value != null ? String(value) : '';
+            let shownText = val, hiddenVal = val, items = '';
+            (field.options || []).forEach(function (opt) {
+                const optLabel = typeof opt === 'object' ? (opt.label || opt.value || opt) : opt;
+                const optVal   = typeof opt === 'object' ? (opt.value || opt.label || opt) : opt;
+                if (optVal === val || optLabel === val) { shownText = optLabel; hiddenVal = optVal; }
+                items += '<div class="asset-combo-item" data-value="' + escapeAttr(optVal) + '" data-label="' + escapeAttr(optLabel) + '">' + escapeAttr(optLabel) + '</div>';
+            });
+            return '<div class="' + colClass + '"><label class="form-label fw-semibold">' + field.label + '</label>' +
+                   '<div class="sd-combo position-relative">' +
+                   '<input type="text" class="form-control sd-input" autocomplete="off" placeholder="Type to search…" value="' + escapeAttr(shownText) + '">' +
+                   '<input type="hidden" name="' + field.name + '" class="sd-value" value="' + escapeAttr(hiddenVal) + '">' +
+                   '<div class="asset-combo-dropdown">' + items + '<div class="asset-combo-empty" style="display:none">No matches</div></div>' +
+                   '</div></div>';
+        }
         if (field.type === 'select') {
             const val = value != null ? String(value) : '';
             let opts = '<option value="">—</option>';
@@ -314,6 +331,66 @@ document.addEventListener('DOMContentLoaded', function () {
         const inputType = field.type === 'date' ? 'date' : (field.type === 'number' ? 'number' : (field.type === 'email' ? 'email' : (field.type === 'url' ? 'url' : 'text')));
         return '<div class="' + colClass + '"><label class="form-label fw-semibold">' + field.label + '</label>' +
                '<input type="' + inputType + '" name="' + field.name + '" class="form-control" value="' + esc + '"></div>';
+    }
+
+    function setupStaticCombo(wrap) {
+        const input = wrap.querySelector('.sd-input');
+        const hidden = wrap.querySelector('.sd-value');
+        const dropdown = wrap.querySelector('.asset-combo-dropdown');
+        const empty = dropdown.querySelector('.asset-combo-empty');
+        const items = Array.from(dropdown.querySelectorAll('.asset-combo-item'));
+        const initialText = input.value;
+        const initialHidden = hidden.value;
+
+        function visibleItems() { return items.filter(function (it) { return it.style.display !== 'none'; }); }
+        function filter() {
+            const q = input.value.trim().toLowerCase();
+            items.forEach(function (it) {
+                it.classList.remove('active');
+                it.style.display = (!q || it.dataset.label.toLowerCase().indexOf(q) !== -1) ? '' : 'none';
+            });
+            empty.style.display = visibleItems().length ? 'none' : '';
+        }
+        function open() { filter(); dropdown.style.display = 'block'; }
+        function close() { dropdown.style.display = 'none'; }
+        function pick(it) { input.value = it.dataset.label; hidden.value = it.dataset.value; close(); }
+        function syncHidden() {
+            const t = input.value.trim().toLowerCase();
+            const m = items.find(function (it) { return it.dataset.label.toLowerCase() === t; });
+            hidden.value = m ? m.dataset.value : '';
+            return m;
+        }
+
+        input.addEventListener('focus', open);
+        input.addEventListener('input', function () { syncHidden(); open(); });
+        input.addEventListener('blur', function () {
+            if (input.value === initialText) { hidden.value = initialHidden; }
+            else if (!syncHidden() && input.value.trim()) { input.value = ''; }
+            close();
+        });
+        dropdown.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        dropdown.addEventListener('click', function (e) {
+            const it = e.target.closest('.asset-combo-item');
+            if (it) pick(it);
+        });
+        input.addEventListener('keydown', function (e) {
+            const vis = visibleItems();
+            let idx = vis.findIndex(function (i) { return i.classList.contains('active'); });
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (dropdown.style.display !== 'block') open();
+                if (!vis.length) return;
+                if (idx >= 0) vis[idx].classList.remove('active');
+                idx = e.key === 'ArrowDown' ? (idx + 1) % vis.length : (idx <= 0 ? vis.length - 1 : idx - 1);
+                vis[idx].classList.add('active');
+                vis[idx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                if (dropdown.style.display === 'block') {
+                    e.preventDefault();
+                    if (idx >= 0) pick(vis[idx]); else if (vis.length === 1) pick(vis[0]);
+                }
+            } else if (e.key === 'Escape') { close(); }
+        });
     }
 
     function setupCombo(wrap) {
@@ -489,6 +566,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 
+        const wrapNotes = document.getElementById('field-wrap-notes');
+        if (wrapNotes) wrapNotes.style.display = (!cfg || cfg.show_notes !== false) ? '' : 'none';
         document.querySelectorAll('[data-common-field]').forEach(function (el) {
 
             const show = !!cfg && cfg.common_fields.indexOf(el.dataset.commonField) !== -1;
@@ -562,6 +641,8 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
             extraContainer.querySelectorAll('.asset-combo').forEach(setupCombo);
+
+            extraContainer.querySelectorAll('.sd-combo').forEach(setupStaticCombo);
 
         } else {
 

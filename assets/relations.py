@@ -8,7 +8,6 @@ Provides centralized resolution of inter-asset relationships:
 
 import re
 from typing import List, Dict, Any, Optional
-from django.db.models import Q
 from .models import Asset, AssetCategory
 
 
@@ -176,8 +175,6 @@ def get_reverse_relationships(asset: Asset) -> List[Dict[str, Any]]:
         return []
     
     cat_name = asset.category.name.strip()
-    tag = asset.asset_tag.strip()
-    name = asset.name.strip()
     
     reverse_groups = []
     

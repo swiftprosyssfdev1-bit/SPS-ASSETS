@@ -62,9 +62,9 @@
                 <tr{% if h.field_name == "is_active" and h.new_value == "False" %} class="table-danger"{% endif %}>
                     <td>
                         <a href="{% url 'assets:asset_update' h.asset_id %}" class="text-decoration-none">
-                            {{ h.asset.name }}
+                            {{ h.asset.display_name }}
                         </a>
-                        <div class="text-muted small">{{ h.asset.asset_tag }}</div>
+                        <div class="text-muted small">{{ h.asset.display_tag }}</div>
                     </td>
                     <td class="text-muted">{{ h.asset.category.name }}</td>
                     <td class="text-capitalize">

@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from .models import Asset, AssetCategory
-from .category_fields import SENSITIVE_FIELD_NAMES, _is_sensitive_field, is_category_db_configured, get_category_fields
+from .category_fields import _is_sensitive_field, is_category_db_configured, get_category_fields
 from .sheet_templates import get_sheet_template, diff_headers as _diff_template_headers
 
 MAX_IMPORT_ROWS = 20000
@@ -238,7 +238,6 @@ def _read_xls_bytes(raw_bytes, sheet_index=0, sheet_name=None):
         row = []
         for cell in ws.row(row_idx):
             if cell.ctype == xlrd.XL_CELL_DATE:
-                import datetime
                 val = xlrd.xldate_as_datetime(cell.value, wb.datemode).date()
             elif cell.ctype == xlrd.XL_CELL_EMPTY:
                 val = None
@@ -267,7 +266,6 @@ def _read_xls_all_sheets(raw_bytes):
             row = []
             for cell in ws.row(row_idx):
                 if cell.ctype == xlrd.XL_CELL_DATE:
-                    import datetime
                     val = xlrd.xldate_as_datetime(cell.value, wb.datemode).date()
                 elif cell.ctype == xlrd.XL_CELL_EMPTY:
                     val = None
@@ -1330,6 +1328,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
     sheet_tag_aliases = {}
     results = []
     for i, raw_row in enumerate(data_rows, start=1):
+        tag_shared_base = None  # set when a cross-sheet collision suffixed the tag (SPS011 -> SPS011-2)
         pending_tag_key = None  # set below when this row claims a tag, so it
         merge_into_prev = None
         # can be recorded into same_entity_tag_results once its result exists
@@ -1495,6 +1494,8 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
             # cross-sheet collision (e.g. "APPLE" in both Keyboard and Mouse).
             # These are coincidences, not data errors — make the tag unique.
             base_tag, n = tag[:45], 2
+            if not used_fallback_tag:
+                tag_shared_base = tag
             tag_key = tag.lower()
             while tag_key in existing_tags or tag_key in seen_tags_in_file:
                 tag = f"{base_tag}-{n}"[:50]
@@ -1540,7 +1541,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 # Software and OS) — build a reasonable default from the
                 # category + tag instead of rejecting every row (e.g.
                 # "Workstation SPS019").
-                name = f"{category_display_name} {tag}".strip() if tag else category_display_name
+                name = f"{category_display_name} {tag_shared_base or tag}".strip() if tag else category_display_name
                 if category_display_name == "Project Details" and tag:
                     name = tag  # the project name is the tag
                 raw_display["Name"] = name
@@ -1671,7 +1672,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                     if value == "" and f.required:
                         errors.append(f"{f.label} is required")
                     elif value != "":
-                        if f.field_type == 'select':
+                        if f.field_type in ("select", "searchable_select"):
                             opts = {opt.value.lower(): opt.value for opt in f.options.all() if opt.is_active}
                             opt_labels = {opt.label.lower(): opt.value for opt in f.options.all() if opt.is_active}
                             val_lower = value.lower()
@@ -1721,7 +1722,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
             for f in db_fields:
                 if f.label in skipped_sensitive:
                     display_value = "•••• (hidden)"
-                elif f.field_type == "select" and extra_details.get(f.key):
+                elif f.field_type in ("select", "searchable_select") and extra_details.get(f.key):
                     opt = next((o for o in f.options.all() if o.value == extra_details[f.key]), None)
                     display_value = opt.label if opt else extra_details[f.key]
                 else:
@@ -1770,12 +1771,24 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         # template copies are dropped — otherwise a leftover "Status" key
         # would show up as the capacity in the legacy-fallback display.
         if (category_display_name or "").strip().lower() == "air conditioner":
-            capacity = extra_details.get("Capacity / Location", "")
+            # Template imports store the column under its header text; a
+            # Category-Builder category (AssetField rows) stores it under the
+            # field KEY. Read both, or a builder-configured A/C loses it.
+            capacity = (
+                extra_details.get("capacity_location")
+                or extra_details.get("Capacity / Location")
+                or ""
+            ).strip()
             # Legacy "Others" sheet layout (ID / Device Type / Device Name /
             # Status / Details): its "Status" column holds the capacity +
             # location ("1.5 TON, ADMIN ROOM") and "Details" holds the service
             # note ("serviced on 28/2/2020"). Use them instead of dropping them.
             raw_status_text = (extra_details.get("Status") or "").strip()
+            if not raw_status_text and status_text:
+                # Builder-configured category: the Status column is consumed
+                # by the real status field and never reaches extra_details,
+                # so use the raw cell text read earlier in this loop.
+                raw_status_text = status_text.strip()
             if not capacity and raw_status_text and not STATUS_LOOKUP.get(_normalize_header(raw_status_text)):
                 capacity = raw_status_text
                 if fields.get("status") == "other":
@@ -1791,7 +1804,15 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 else:
                     existing_note = fields.get("notes", "")
                     fields["notes"] = f"{existing_note} {details_text}".strip()
-            extra_details = {"capacity_location": capacity} if capacity else {}
+            if is_db_configured:
+                # Keep every other builder field already collected; only drop
+                # the raw legacy copies and store the clean capacity.
+                for _legacy_key in ("Capacity / Location", "Status", "Details"):
+                    extra_details.pop(_legacy_key, None)
+                if capacity:
+                    extra_details["capacity_location"] = capacity
+            else:
+                extra_details = {"capacity_location": capacity} if capacity else {}
 
         fields["extra_details"] = extra_details
 
@@ -1995,7 +2016,6 @@ def validate_workstation_rows(header_row, data_rows, workstation_fields,
     status_lookup = _workstation_status_lookup()
     existing_tags = {t.lower() for t in Asset.objects.values_list("asset_tag", flat=True)}
     branches_by_norm = {_normalize_header(b.name): b for b in Branch.objects.filter(status=True)}
-    seen_tags_in_file = set()
 
     template_headers_list = (
         ["Workstation ID", "Status", "Branch", "Notes"] + [f.label for f in workstation_fields]
@@ -2078,7 +2098,7 @@ def validate_workstation_rows(header_row, data_rows, workstation_fields,
                             pending_lookups[f.key] = {
                                 "raw": value, "multi": bool(is_multi), "category": target_cat or "",
                             }
-                    elif f.field_type == "select":
+                    elif f.field_type in ("select", "searchable_select"):
                         opts_by_value = {o.value.lower(): o.value for o in f.options.all() if o.is_active}
                         opts_by_label = {o.label.lower(): o.value for o in f.options.all() if o.is_active}
                         val_lower = value.lower()

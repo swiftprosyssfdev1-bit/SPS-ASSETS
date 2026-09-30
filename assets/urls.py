@@ -64,4 +64,5 @@ urlpatterns = [
     path("category/<int:category_id>/builder/field/<int:field_id>/delete/", views.builder_field_delete, name="builder_field_delete"),
     path("category/<int:category_id>/builder/field/reorder/", views.builder_field_reorder, name="builder_field_reorder"),
     path("config-audit/", views.config_audit_log, name="config_audit_log"),
+    path("config-audit/clear/", views.config_audit_log_clear, name="config_audit_log_clear"),
 ]

@@ -52,25 +52,28 @@
 
     <hr class="my-4">
     <div class="small text-muted">
-        <div class="fw-semibold mb-2">Single sheet (.csv, .txt, or one-tab .xlsx) — expected columns:</div>
+        <div class="fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>Option 1: Single sheet (.csv, .txt or one-tab .xlsx)</div>
+        <div class="mb-2">Use these column headers in the first row. The order does not matter.</div>
         <div class="d-flex flex-wrap gap-1 mb-3">
             {% for col in import_columns %}
             <span class="badge text-bg-light border">{{ col }}</span>
             {% endfor %}
         </div>
-        <ul class="mb-3 ps-3">
-            <li><strong>Category</strong>, <strong>Asset Tag</strong> and <strong>Name</strong> are required; everything else is optional.</li>
-            <li><strong>Category</strong> must match an existing category name exactly (not case-sensitive).</li>
-            <li><strong>Asset Tag</strong> must be unique — not already used, and not repeated in the file.</li>
-            <li><strong>Status</strong> accepts values like Working, Not Working, Idle, Scrap, Missing, Under Service (defaults to Working if blank).</li>
-            <li>Dates should be <code>YYYY-MM-DD</code> (e.g. 2025-01-15) — a few common alternatives like <code>DD-MM-YYYY</code> and <code>DD/MM/YYYY</code> are also accepted, but YYYY-MM-DD is never ambiguous.</li>
+        <ul class="mb-4 ps-3">
+            <li><strong>Required:</strong> Category, Asset Tag and Name. All other columns are optional.</li>
+            <li><strong>Category</strong> must match an existing category name (upper/lower case does not matter).</li>
+            <li><strong>Asset Tag</strong> must be unique. It cannot already exist in the system or repeat within the file.</li>
+            <li><strong>Status</strong> can be Working, Not Working, Idle, Scrap, Missing or Under Service. Blank means Working.</li>
+            <li><strong>Dates</strong> work best as <code>YYYY-MM-DD</code> (e.g. 2025-01-15). <code>DD-MM-YYYY</code> and <code>DD/MM/YYYY</code> are also accepted.</li>
         </ul>
-        <div class="fw-semibold mb-2">Multiple sheets (.xlsx with 2+ tabs):</div>
+
+        <div class="fw-semibold mb-2"><i class="bi bi-files me-1"></i>Option 2: Multiple sheets (.xlsx with 2 or more tabs)</div>
+        <div class="mb-2">Each tab is imported as one category, so you can upload the whole workbook at once.</div>
         <ul class="mb-0 ps-3">
-            <li>Each <strong>sheet tab name is matched to a category</strong> by name (case/spacing-insensitive) or a few built-in aliases (e.g. a tab named "Bluetooth" imports into "Bluetooth Device"). A tab named "Monitor" imports into the Monitor category.</li>
-            <li>Sheets can use their own real column names — there's no need to rename anything to "Asset Tag" or "Name". If no column looks like an Asset Tag, the sheet's <strong>first column</strong> is used as the unique ID automatically; if there's no obvious Name column, one is generated from the category + ID.</li>
-            <li>Any other columns (Monitor's Type/Color/Size, System's Processor/RAM/OS Type, etc.) are kept as-is against each asset — whatever they're called.</li>
-            <li>Tabs that don't match any category still import, under the catch-all <strong>"Other Asset"</strong> category, so nothing is silently dropped. Only tabs that are completely empty are skipped. Both are listed after validation — the rest of the file still imports.</li>
+            <li><strong>Tab name = category.</strong> The tab name is matched to a category (case and spacing are ignored), or through a few built-in names. For example, a tab named "Monitor" goes to Monitor and "Bluetooth" goes to Bluetooth Device.</li>
+            <li><strong>Your own column names are fine.</strong> You do not need to rename columns to "Asset Tag" or "Name". If no column looks like an Asset Tag, the first column is used as the unique ID. If there is no Name column, a name is created from the category and ID.</li>
+            <li><strong>Extra columns are kept.</strong> Columns such as Type, Color, Size, Processor or RAM are saved with each asset under their own headers.</li>
+            <li><strong>Unmatched tabs are not lost.</strong> A tab that matches no category is imported under "Other Asset". Completely empty tabs are skipped. Both cases are listed after validation, and the rest of the file still imports.</li>
         </ul>
     </div>
 </div>

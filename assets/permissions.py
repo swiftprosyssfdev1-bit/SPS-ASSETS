@@ -13,7 +13,7 @@ is the single place that decision is made so it can't drift out of sync
 between views.
 """
 
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 
@@ -80,7 +80,12 @@ def get_active_branch_id(request):
     """The branch currently selected via the dropdown (session-backed).
     Returns None for 'All Branches' (Super Admin only)."""
     raw = request.session.get(SESSION_BRANCH_KEY)
-    return int(raw) if raw not in (None, "", "all") else None
+    if raw in (None, "", "all"):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def set_active_branch(request, branch_id):

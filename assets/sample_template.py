@@ -55,7 +55,7 @@ SAMPLE_ROWS = {
             'Antivirus', 'Condition', 'Notes', 'others',
         ],
         [
-            '002', 'SPSW010002', '$w!ft@Pr0&ys', 'Win 7 Ultimate x64 bit(Pirated)',
+            '002', 'SPSW010002', '<REDACTED>', 'Win 7 Ultimate x64 bit(Pirated)',
             'Intel® Core™ i3 CPU 530 @ 2.93GHz', 'Intel Server Board S3420GPV', None,
             None, None, None, 'Transcend DDR3 2. (2.00 GB)=4GB', None,
             'Display Problem(Idle)', None, None, None, None, None, None, None,

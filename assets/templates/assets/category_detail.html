@@ -108,7 +108,7 @@
                     {% for f in list_fields %}
                     <th>{{ f.label }}</th>
                     {% endfor %}
-                    <th>Status</th>
+                    {% if show_status|default_if_none:True %}<th>Status</th>{% endif %}
                     {% else %}
                     <th>{{ tag_label }}</th>
                     {% if not hide_name %}<th>Name</th>{% endif %}
@@ -126,7 +126,7 @@
                 {% for a in assets %}
                 <tr>
                     {% if is_cupboard %}
-                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
+                    <td class="fw-semibold font-monospace">{{ a.display_tag }}</td>
                     <td>
                         {% with item_type=a.extra_details|xget:"Item Type" %}
                             {% if item_type == "Hard Disk" %}
@@ -139,7 +139,7 @@
                         {% endwith %}
                     </td>
                     <td class="fw-semibold">
-                        {{ a.name }}
+                        {{ a.display_name }}
                         {% if a.brand and a.brand != 'Cupboard Storage' and a.brand != 'Accessory' and a.brand != 'Generic / OEM' %}
                         <span class="badge bg-light text-muted border ms-1">{{ a.brand }}</span>
                         {% endif %}
@@ -167,15 +167,15 @@
                         {% endif %}
                     </td>
                     {% elif is_vendor %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td class="fw-semibold">{{ a.display_tag }}</td>
+                    <td class="fw-semibold">{{ a.display_name }}</td>
                     <td>{{ a.extra_details|xget:"Types of Service"|default:"—" }}</td>
                     <td>{{ a.extra_details|xget:"Contact Person"|default:"—" }}</td>
                     <td>{{ a.extra_details|xget:"Mobile No"|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% elif is_employee %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td class="fw-semibold">{{ a.display_tag }}</td>
+                    <td class="fw-semibold">{{ a.display_name }}</td>
                     <td>
                         {% with emp_st=a.extra_details|xget:"Status"|default:a.get_status_display %}
                             {% if emp_st == 'Active' or emp_st == 'active' %}
@@ -192,18 +192,18 @@
                         {% endwith %}
                     </td>
                     {% elif is_incident %}
-                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
+                    <td class="fw-semibold font-monospace">{{ a.display_tag }}</td>
                     <td><span class="badge bg-light text-dark border">{{ a.extra_details|xget:"Incident Type"|default:"Incident" }}</span></td>
                     <td style="max-width: 320px;" class="text-wrap">{{ a.extra_details|xget:"Incident Description"|default:"—" }}</td>
                     <td class="text-nowrap small text-muted">{{ a.extra_details|xget:"Start Date&Time"|default:"—" }}</td>
                     <td class="text-nowrap small text-muted">{{ a.extra_details|xget:"End Date&Time"|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% elif is_project_details %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
+                    <td class="fw-semibold">{{ a.display_tag }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% elif is_ac %}
-                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
-                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td class="fw-semibold font-monospace">{{ a.display_tag }}</td>
+                    <td class="fw-semibold">{{ a.display_name }}</td>
                     <td>
                         {% with cap=a.extra_details|xget:"capacity_location" legacy_cap=a.extra_details|xget:"Status" %}
                             {{ cap|default:legacy_cap|default:a.current_location|default:"—" }}
@@ -222,8 +222,8 @@
                         {% endwith %}
                     </td>
                     {% elif is_info_register %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
+                    <td class="fw-semibold">{{ a.display_tag }}</td>
+                    {% if not hide_name %}<td>{{ a.display_name }}</td>{% endif %}
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
                     {% if list_summary_field %}
                     <td>
@@ -241,8 +241,8 @@
                     </td>
                     {% endif %}
                     {% elif is_hard_disk %}
-                    <td class="fw-semibold font-monospace">{{ a.asset_tag }}</td>
-                    <td class="fw-semibold">{{ a.name }}</td>
+                    <td class="fw-semibold font-monospace">{{ a.display_tag }}</td>
+                    <td class="fw-semibold">{{ a.display_name }}</td>
                     <td>{{ a.extra_details|xget:"Size"|default:"—" }}</td>
                     <td>
                         {% if a.serial_number %}
@@ -266,15 +266,15 @@
                         {% endwith %}
                     </td>
                     {% elif has_dynamic_fields %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
+                    <td class="fw-semibold">{{ a.display_tag }}</td>
+                    {% if not hide_name %}<td>{{ a.display_name }}</td>{% endif %}
                     {% for f in list_fields %}
                     <td>{{ a|field_value:f|default:"—" }}</td>
                     {% endfor %}
-                    <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>
+                    {% if show_status|default_if_none:True %}<td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>{% endif %}
                     {% else %}
-                    <td class="fw-semibold">{{ a.asset_tag }}</td>
-                    {% if not hide_name %}<td>{{ a.name }}</td>{% endif %}
+                    <td class="fw-semibold">{{ a.display_tag }}</td>
+                    {% if not hide_name %}<td>{{ a.display_name }}</td>{% endif %}
                     <td>{{ a.brand }} {{ a.model_number }}</td>
                     <td>{{ a.serial_number|default:"—" }}</td>
                     <td><span class="badge badge-status-{{ a.status }}">{{ a.get_status_display }}</span></td>

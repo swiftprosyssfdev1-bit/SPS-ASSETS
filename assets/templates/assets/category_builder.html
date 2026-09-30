@@ -97,7 +97,7 @@
         display: flex; align-items: center; justify-content: center; font-size: .95rem;
     }
     .type-icon.t-text, .type-icon.t-textarea { background: rgba(108,117,125,.12); color: #5a6472; }
-    .type-icon.t-select { background: rgba(111,66,193,.12); color: #6f42c1; }
+    .type-icon.t-select, .type-icon.t-searchable_select { background: rgba(111,66,193,.12); color: #6f42c1; }
     .type-icon.t-number { background: rgba(32,201,151,.14); color: #17a589; }
     .type-icon.t-date { background: rgba(247,148,29,.15); color: var(--swift-orange); }
     .type-icon.t-email, .type-icon.t-url { background: rgba(41,171,226,.14); color: var(--swift-blue-dark); }
@@ -208,7 +208,7 @@
                     <i class="bi bi-grip-vertical drag-handle" title="Drag to reorder"></i>
                     <div class="type-icon t-{{ f.field_type }}">
                         {% if f.field_type == "textarea" %}<i class="bi bi-text-paragraph"></i>
-                        {% elif f.field_type == "select" %}<i class="bi bi-menu-button-wide"></i>
+                        {% elif f.field_type == "searchable_select" %}<i class="bi bi-search"></i>{% elif f.field_type == "select" %}<i class="bi bi-menu-button-wide"></i>
                         {% elif f.field_type == "number" %}<i class="bi bi-123"></i>
                         {% elif f.field_type == "date" %}<i class="bi bi-calendar3"></i>
                         {% elif f.field_type == "email" %}<i class="bi bi-envelope"></i>
@@ -275,7 +275,7 @@
                         <label class="form-label fw-semibold">{{ f.label }}{% if f.required %} <span class="text-danger">*</span>{% endif %}</label>
                         {% if f.field_type == "textarea" %}
                         <textarea class="form-control form-control-sm" rows="2" disabled placeholder="{{ f.placeholder }}"></textarea>
-                        {% elif f.field_type == "select" %}
+                        {% elif f.field_type == "select" or f.field_type == "searchable_select" %}
                         <select class="form-select form-select-sm" disabled>
                             <option>—</option>
                             {% for opt in f.options.all %}
@@ -325,7 +325,7 @@
                             <select name="field_type" class="form-select" id="add-field-type" onchange="toggleOptions(this,'add-options-group')">
                                 <option value="text">Single Line Text</option>
                                 <option value="textarea">Multi-Line Text</option>
-                                <option value="select">Dropdown</option>
+                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown</option>
                                 <option value="number">Number</option>
                                 <option value="date">Date</option>
                                 <option value="email">Email</option>
@@ -400,7 +400,7 @@
                             <select name="field_type" id="edit-field-type" class="form-select" onchange="toggleOptions(this,'edit-options-group')">
                                 <option value="text">Single Line Text</option>
                                 <option value="textarea">Multi-Line Text</option>
-                                <option value="select">Dropdown</option>
+                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown</option>
                                 <option value="number">Number</option>
                                 <option value="date">Date</option>
                                 <option value="email">Email</option>
@@ -479,7 +479,7 @@ function showEditModal(fid, label, ftype, width, required, placeholder, helpText
 }
 
 function toggleOptions(sel, groupId) {
-    document.getElementById(groupId).style.display = sel.value === 'select' ? '' : 'none';
+    document.getElementById(groupId).style.display = (sel.value === 'select' || sel.value === 'searchable_select') ? '' : 'none';
 }
 
 (function() {

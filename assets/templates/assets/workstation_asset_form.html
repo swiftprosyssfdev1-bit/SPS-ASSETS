@@ -60,6 +60,17 @@
                     <div class="ws-combo-dropdown"></div>
                 </div>
 
+                {% elif field.type == "searchable_select" %}
+                <div class="ws-sd position-relative">
+                    <input type="text" class="form-control ws-sd-input" autocomplete="off"
+                           placeholder="{{ field.placeholder|default:'Type to search…' }}" value="{{ field.value }}" {% if field.required %}required{% endif %}>
+                    <input type="hidden" name="{{ field.name }}" class="ws-sd-value" value="{{ field.value }}">
+                    <div class="ws-combo-dropdown">
+                        {% for opt in field.options %}<div class="ws-combo-item" data-value="{{ opt }}">{{ opt }}</div>{% endfor %}
+                        <div class="ws-combo-empty" style="display:none">No matches</div>
+                    </div>
+                </div>
+
                 {% elif field.type == "select" %}
                 <select name="{{ field.name }}" class="form-select" {% if field.required %}required{% endif %}>
                     <option value="">—</option>
@@ -133,6 +144,68 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (data) { cb(data.results || []); })
             .catch(function () { cb([]); });
     }
+
+    // Searchable Dropdown fields (static option list, type-to-filter)
+    document.querySelectorAll('.ws-sd').forEach(function (wrap) {
+        const input = wrap.querySelector('.ws-sd-input');
+        const hidden = wrap.querySelector('.ws-sd-value');
+        const dropdown = wrap.querySelector('.ws-combo-dropdown');
+        const empty = dropdown.querySelector('.ws-combo-empty');
+        const items = Array.from(dropdown.querySelectorAll('.ws-combo-item'));
+        const initialText = input.value;
+        const initialHidden = hidden.value;
+
+        function visibleItems() { return items.filter(function (it) { return it.style.display !== 'none'; }); }
+        function filter() {
+            const q = input.value.trim().toLowerCase();
+            items.forEach(function (it) {
+                it.classList.remove('active');
+                it.style.display = (!q || it.dataset.value.toLowerCase().indexOf(q) !== -1) ? '' : 'none';
+            });
+            empty.style.display = visibleItems().length ? 'none' : '';
+        }
+        function open() { filter(); dropdown.style.display = 'block'; }
+        function close() { dropdown.style.display = 'none'; }
+        function pick(it) { input.value = it.dataset.value; hidden.value = it.dataset.value; close(); }
+        function syncHidden() {
+            const t = input.value.trim().toLowerCase();
+            const m = items.find(function (it) { return it.dataset.value.toLowerCase() === t; });
+            hidden.value = m ? m.dataset.value : '';
+            return m;
+        }
+
+        input.addEventListener('focus', open);
+        input.addEventListener('input', function () { syncHidden(); open(); });
+        input.addEventListener('blur', function () {
+            if (input.value === initialText) { hidden.value = initialHidden; }
+            else if (!syncHidden() && input.value.trim()) { input.value = ''; }
+            close();
+        });
+        dropdown.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        dropdown.addEventListener('click', function (e) {
+            const it = e.target.closest('.ws-combo-item');
+            if (it) pick(it);
+        });
+        input.addEventListener('keydown', function (e) {
+            const vis = visibleItems();
+            let idx = vis.findIndex(function (i) { return i.classList.contains('active'); });
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (dropdown.style.display !== 'block') open();
+                if (!vis.length) return;
+                if (idx >= 0) vis[idx].classList.remove('active');
+                idx = e.key === 'ArrowDown' ? (idx + 1) % vis.length : (idx <= 0 ? vis.length - 1 : idx - 1);
+                vis[idx].classList.add('active');
+                vis[idx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                if (dropdown.style.display === 'block') {
+                    e.preventDefault();
+                    if (idx >= 0) pick(vis[idx]); else if (vis.length === 1) pick(vis[0]);
+                }
+            } else if (e.key === 'Escape') { close(); }
+        });
+        document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) close(); });
+    });
 
     // Single-value Lookup fields
     document.querySelectorAll('.ws-combo-single').forEach(function (wrap) {

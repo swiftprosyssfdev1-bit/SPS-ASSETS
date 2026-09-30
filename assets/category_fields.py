@@ -493,6 +493,9 @@ def resolve_field_value(asset, field):
     lbl = _norm_key(label)
     if not lbl:
         return ""
+    bound = _builder_bound_value(asset, field)
+    if bound is not None:
+        return bound
     cfg = get_category_field_labels(asset.category)
 
     def is_(key):
@@ -526,3 +529,98 @@ def resolve_field_value(asset, field):
     if lbl == "notes":
         return asset.notes or ""
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Builder-driven Add/Edit layout
+# ---------------------------------------------------------------------------
+# For a category configured in the Category Builder (AssetField rows), the
+# form shows ONLY what the builder defines. A builder field whose key/label
+# is a real Asset column (brand, model, serial, status, location ...) is
+# bound to that column; everything else goes to Asset.extra_details.
+# Nothing generic (Name, Status, Location, Notes ...) is shown unless the
+# builder has a field for it.
+_BUILDER_COLUMN_MAP = {
+    "tag": "asset_tag", "asset tag": "asset_tag", "asset id": "asset_tag", "asset tag id": "asset_tag",
+    "name": "name",
+    "brand": "brand",
+    "model": "model_number", "model no": "model_number", "model number": "model_number",
+    "serial": "serial_number", "serial no": "serial_number", "serial number": "serial_number",
+    "status": "status", "current status": "status", "condition": "status",
+    "assigned to": "current_assigned_to", "current assigned to": "current_assigned_to",
+    "user name": "current_assigned_to", "employee name": "current_assigned_to",
+    "location": "current_location", "current location": "current_location",
+    "linked workstation": "linked_workstation", "workstation": "linked_workstation",
+    "purchase date": "purchase_date",
+    "last service date": "last_service_date",
+    "notes": "notes", "remark": "notes", "remarks": "notes",
+}
+_LABEL_KEY_FOR_COLUMN = {
+    "asset_tag": "tag_label", "name": "name_label", "model_number": "model_label",
+    "serial_number": "serial_label", "current_location": "location_label",
+    "current_assigned_to": "assigned_label", "status": "status_label",
+}
+
+
+def builder_field_column(field):
+    """The real Asset column a Category-Builder field is bound to
+    ('asset_tag', 'name', 'status', 'brand', ...), or None when it is a plain
+    extra_details field. Same rule get_builder_layout() uses."""
+    import re
+    for cand in (field.get("name"), field.get("label")):
+        norm = re.sub(r"[^a-z0-9]+", " ", str(cand or "").lower()).strip()
+        if norm in _BUILDER_COLUMN_MAP:
+            return _BUILDER_COLUMN_MAP[norm]
+    return None
+
+def get_builder_layout(category):
+    """None unless `category` (an AssetCategory instance) is configured in the
+    Category Builder. Otherwise a dict describing exactly which Add/Edit form
+    controls to show, driven only by the category's ACTIVE AssetField rows."""
+    import re
+    if not is_category_db_configured(category):
+        return None
+    common, labels, consumed, required, list_skip = [], {}, set(), [], set()
+    show_name = show_notes = False
+    for f in get_category_fields(category):
+        col = None
+        for cand in (f.get("name"), f.get("label")):
+            norm = re.sub(r"[^a-z0-9]+", " ", str(cand or "").lower()).strip()
+            if norm in _BUILDER_COLUMN_MAP:
+                col = _BUILDER_COLUMN_MAP[norm]
+                break
+        if col is None:
+            continue
+        consumed.add(f["name"])
+        if col in ("asset_tag", "name", "status"):
+            list_skip.add(f["name"])   # drawn as the fixed Tag / Name / Status columns
+        if col == "name":
+            show_name = True
+        elif col == "notes":
+            show_notes = True
+        elif col != "asset_tag" and col not in common:
+            common.append(col)
+        if col in _LABEL_KEY_FOR_COLUMN:
+            labels[_LABEL_KEY_FOR_COLUMN[col]] = f["label"]
+        if f.get("required") and col not in ("asset_tag", "name", "notes"):
+            required.append([col, f["label"]])
+    return {
+        "common_fields": common, "labels": labels, "consumed": consumed,
+        "show_name": show_name, "show_notes": show_notes, "required_common": required,
+        "list_skip": list_skip,
+    }
+
+
+def _builder_bound_value(asset, field):
+    """For a Category-Builder category, a field that maps onto a real Asset
+    column (Brand, Model, Serial ...) reads that column. None = not bound."""
+    import re
+    if not is_category_db_configured(getattr(asset, "category", None)):
+        return None
+    for cand in (field.get("name"), field.get("label")):
+        norm = re.sub(r"[^a-z0-9]+", " ", str(cand or "").lower()).strip()
+        col = _BUILDER_COLUMN_MAP.get(norm)
+        if col and col != "status":
+            val = getattr(asset, col, None)
+            return "" if val is None else val
+    return None

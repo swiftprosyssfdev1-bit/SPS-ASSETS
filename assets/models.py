@@ -1,4 +1,7 @@
+import uuid
+
 from django.db import models
+from django.db.models.functions import Lower
 from django.conf import settings
 from django.utils import timezone
 
@@ -159,6 +162,70 @@ class Asset(models.Model):
     def __str__(self):
         return f"{self.asset_tag} - {self.name}"
 
+    @property
+    def display_tag(self):
+        """The tag to SHOW. asset_tag is unique database-wide, so when the same
+        ID (e.g. SPS011 = one person's Employee row AND their Software / OS
+        License row) was imported on two sheets, the later one was stored as
+        'SPS011-2'. If the un-suffixed tag belongs to an asset in a DIFFERENT
+        category, show the plain tag - it is the same ID, shared. The stored
+        asset_tag is untouched, so links / search / uniqueness keep working."""
+        cached = getattr(self, "_display_tag_cache", None)
+        if cached is not None:
+            return cached
+        import re
+        tag = self.asset_tag or ""
+        shown = tag
+        m = re.match(r"^(.+)-(\d+)$", tag)
+        if m and self.category_id:
+            base = m.group(1)
+            if Asset.objects.filter(asset_tag__iexact=base).exclude(category_id=self.category_id).exists():
+                shown = base
+        self._display_tag_cache = shown
+        return shown
+
+    @property
+    def display_name(self):
+        """Name with an auto-generated '<Category> <tag>' name pointing at the
+        shown tag (e.g. 'Software / OS License SPS011', not '...SPS011-2')."""
+        tag, shown = self.asset_tag or "", self.display_tag
+        if shown != tag and (self.name or "").endswith(tag):
+            return self.name[: -len(tag)] + shown
+        return self.name
+
+
+def prime_display_tags(assets):
+    """Compute Asset.display_tag for many assets with ONE query per 500 tags,
+    instead of one query per suffixed tag (the N+1 the property causes on long
+    lists). Returns the assets as a list; each instance gets its display tag
+    cached, so templates that call {{ a.display_tag }} / {{ a.display_name }}
+    run no further queries. Result is identical to the property's own logic."""
+    import re
+    assets = list(assets)
+    pending = []
+    for a in assets:
+        if getattr(a, "_display_tag_cache", None) is not None:
+            continue
+        tag = a.asset_tag or ""
+        m = re.match(r"^(.+)-(\d+)$", tag)
+        if m and a.category_id:
+            pending.append((a, m.group(1)))
+        else:
+            a._display_tag_cache = tag
+    if pending:
+        bases = sorted({base.lower() for _, base in pending})
+        owners = {}
+        for i in range(0, len(bases), 500):
+            rows = (Asset.objects.annotate(_lt=Lower("asset_tag"))
+                    .filter(_lt__in=bases[i:i + 500])
+                    .values_list("_lt", "category_id"))
+            for lt, cid in rows:
+                owners.setdefault(lt, set()).add(cid)
+        for a, base in pending:
+            shared = any(cid != a.category_id for cid in owners.get(base.lower(), ()))
+            a._display_tag_cache = base if shared else a.asset_tag
+    return assets
+
 
 class AssetHistory(models.Model):
     """Automatic audit trail: every time a tracked field changes on an Asset,
@@ -221,6 +288,7 @@ class AssetField(models.Model):
         ("text",     "Single Line Text"),
         ("textarea", "Multi-Line Text"),
         ("select",   "Dropdown"),
+        ("searchable_select", "Searchable Dropdown"),
         ("number",   "Number"),
         ("date",     "Date"),
         ("email",    "Email"),
@@ -277,7 +345,7 @@ class AssetField(models.Model):
             "show_in_add": self.show_in_add,
             "show_in_edit": self.show_in_edit,
         }
-        if self.field_type == "select":
+        if self.field_type in ("select", "searchable_select"):
             d["options"] = list(
                 self.options.filter(is_active=True)
                     .order_by("display_order")
@@ -417,6 +485,7 @@ class WorkstationField(models.Model):
         ("text",     "Single Line Text"),
         ("textarea", "Multi-Line Text"),
         ("select",   "Dropdown"),
+        ("searchable_select", "Searchable Dropdown"),
         ("number",   "Number"),
         ("date",     "Date"),
         ("email",    "Email"),
@@ -485,7 +554,7 @@ class WorkstationField(models.Model):
             "lookup_category": self.lookup_category,
             "lookup_multi": self.lookup_multi,
         }
-        if self.field_type == "select":
+        if self.field_type in ("select", "searchable_select"):
             d["options"] = list(
                 self.options.filter(is_active=True)
                     .order_by("display_order")
@@ -529,3 +598,23 @@ class SiteSetting(models.Model):
 
     def __str__(self):
         return f"{self.key} = {self.value}"
+
+
+class ImportStaging(models.Model):
+    """Validated bulk-import rows waiting for the user to confirm.
+    Only this record's UUID lives in the session (not the rows), so large
+    Excel files can't bloat the session store. Deleted on confirm; stale
+    rows are purged automatically on the next upload."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="import_stagings"
+    )
+    kind = models.CharField(max_length=60)
+    payload = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "kind"])]
+
+    def __str__(self):
+        return f"{self.kind} staging {self.id}"

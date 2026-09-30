@@ -179,7 +179,7 @@
             <tbody>
                 {% for h in recent_changes %}
                 <tr>
-                    <td>{{ h.asset.name }}</td>
+                    <td>{{ h.asset.display_name }}<div class="text-muted small">{{ h.asset.display_tag }}</div></td>
                     <td>{{ h.changed_by|default:"—" }}</td>
                     <td class="text-muted small">{{ h.changed_at }}</td>
                 </tr>
