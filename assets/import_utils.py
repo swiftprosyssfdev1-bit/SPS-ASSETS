@@ -924,7 +924,11 @@ def _diff_live_fields(category, header_row, col_to_field):
     fields = get_category_fields(category)
     field_norms = {_normalize_header(f["label"]) for f in fields}
     extra_cols = get_extra_columns(header_row, col_to_field)
-    uploaded_norms = {_normalize_header(h) for h in extra_cols.values()}
+    # Every header actually present in the sheet counts as "uploaded" — including
+    # ones the importer routes into a core column (Employee Id -> Asset Tag,
+    # EmployeeName -> Name). Looking only at the leftover extra columns made
+    # those required fields show up as "missing" even though the sheet had them.
+    uploaded_norms = {_normalize_header(h) for h in header_row if _normalize_header(h)}
     missing = [
         f["label"] for f in fields
         if f.get("required") and _normalize_header(f["label"]) not in uploaded_norms
@@ -1324,6 +1328,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
         employee_placeholder_counter = [1]
 
     category_db_fields = {}
+    builder_status_cache = {}   # category id -> [(status code, builder label)]
 
     sheet_tag_aliases = {}
     results = []
@@ -1573,7 +1578,24 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
             fields["status"] = blank_default
         else:
             mapped = STATUS_LOOKUP.get(_normalize_header(status_text))
-            if not mapped:
+            status_rejected = False
+            _cat_id = fields.get("category")
+            if mapped and _cat_id:
+                # Category Builder Status dropdown: only its options are valid.
+                if _cat_id not in builder_status_cache:
+                    from .category_fields import builder_status_choices
+                    from .models import AssetCategory as _StatusCat
+                    builder_status_cache[_cat_id] = builder_status_choices(
+                        _StatusCat.objects.get(pk=_cat_id))[0]
+                _bs = builder_status_cache[_cat_id]
+                if _bs and mapped not in {c for c, _l in _bs}:
+                    errors.append(
+                        f"Status '{status_text}' is not one of this category's options "
+                        f"({', '.join(l for _c, l in _bs)})"
+                    )
+                    mapped = None
+                    status_rejected = True
+            if not mapped and not status_rejected:
                 if forced_category is not None:
                     # Multi-sheet legacy-style sheets often have a free-text
                     # note in the Status column instead of a real status
@@ -1658,6 +1680,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
 
         if is_db_configured:
             label_to_field = {_normalize_header(f.label): f for f in db_fields}
+            raw_by_key = {}   # what the sheet actually had, for the preview of rejected cells
             
             for idx, header_text in extra_cols.items():
                 if _is_sensitive_field(header_text):
@@ -1669,6 +1692,7 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 
                 if norm_header in label_to_field:
                     f = label_to_field[norm_header]
+                    raw_by_key[f.key] = value
                     if value == "" and f.required:
                         errors.append(f"{f.label} is required")
                     elif value != "":
@@ -1700,9 +1724,48 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                     if value != "":
                         extra_details[header_text] = value
             
+            from .category_fields import builder_field_column
+            # Headers this sheet routed into a core column (e.g. "Employee Id" ->
+            # asset_tag, "EmployeeName" -> name). Their values never reach
+            # extra_details, so a builder field with the same label has to read
+            # the core column instead — otherwise it looks empty and is reported
+            # as "is required" even though the cell is filled in.
+            consumed_core = {}
+            for _ci, _cf in col_to_field.items():
+                if _cf == "category" or _ci >= len(header_row):
+                    continue
+                _hn = _normalize_header(header_row[_ci])
+                if _hn:
+                    consumed_core[_hn] = _cf
+
+            def _core_col_for(f):
+                return (consumed_core.get(_normalize_header(f.label))
+                        or builder_field_column({"name": f.key, "label": f.label}))
+
             for f in db_fields:
-                if f.required and f.key not in extra_details:
-                    errors.append(f"{f.label} is required")
+                core_col = _core_col_for(f)
+                if (core_col and core_col not in ("status", "asset_tag", "name")
+                        and f.field_type in ("select", "searchable_select")
+                        and fields.get(core_col)):
+                    _allowed = {}
+                    for _o in f.options.all():
+                        if _o.is_active:
+                            _allowed[_o.label.strip().lower()] = _o.label
+                            _allowed.setdefault(_o.value.strip().lower(), _o.label)
+                    _given = str(fields[core_col]).strip().lower()
+                    if _allowed and _given in _allowed:
+                        fields[core_col] = _allowed[_given]
+                    elif _allowed:
+                        _msg = f"Invalid option '{fields[core_col]}' for {f.label}"
+                        if _msg not in errors:
+                            errors.append(_msg)
+                if core_col:
+                    present = bool(fields.get(core_col))
+                else:
+                    present = f.key in extra_details
+                msg = f"{f.label} is required"
+                if f.required and not present and msg not in errors:
+                    errors.append(msg)
 
             # Build a real per-column preview (Asset Tag / Name / Status
             # plus every active Category Builder field, in their configured
@@ -1713,20 +1776,34 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
             # populated template_headers_list/template_row_display the way
             # the sheet_template branch below does. The saved data was never
             # affected, only what admins could see before confirming.
-            template_headers_list = ["Asset Tag", "Name", "Status"] + [f.label for f in db_fields]
-            template_row_display = [
-                {"header": "Asset Tag", "value": raw_display.get("AssetTag", "")},
-                {"header": "Name", "value": raw_display.get("Name", "")},
-                {"header": "Status", "value": raw_display.get("Status", "")},
+            # Columns follow the builder exactly: a Tag column always (import
+            # needs it), Name / Status only when the builder has that field.
+            _cols_in_builder = [_core_col_for(f) for f in db_fields]
+            _tag_field = next((f for f, c in zip(db_fields, _cols_in_builder) if c == "asset_tag"), None)
+            template_headers_list = [] if _tag_field else ["Asset Tag"]
+            template_headers_list += [f.label for f in db_fields]
+            template_row_display = [] if _tag_field else [
+                {"header": "Asset Tag", "value": raw_display.get("AssetTag", "") or fields.get("asset_tag", "")},
             ]
             for f in db_fields:
                 if f.label in skipped_sensitive:
                     display_value = "•••• (hidden)"
+                elif _core_col_for(f) == "asset_tag":
+                    display_value = fields.get("asset_tag", "") or raw_display.get("AssetTag", "")
+                elif _core_col_for(f) == "name":
+                    display_value = raw_display.get("Name", "") or fields.get("name", "")
+                elif _core_col_for(f) == "status":
+                    display_value = raw_display.get("Status", "")
                 elif f.field_type in ("select", "searchable_select") and extra_details.get(f.key):
                     opt = next((o for o in f.options.all() if o.value == extra_details[f.key]), None)
                     display_value = opt.label if opt else extra_details[f.key]
                 else:
+                    core_col = _core_col_for(f)
                     display_value = extra_details.get(f.key, "")
+                    if display_value == "" and core_col:
+                        display_value = fields.get(core_col, "") or ""
+                    if display_value == "":
+                        display_value = raw_by_key.get(f.key, "")
                 template_row_display.append({"header": f.label, "value": display_value})
 
         elif sheet_template is not None:

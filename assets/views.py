@@ -34,6 +34,7 @@ from .category_fields import (
     _norm_key,
     get_category_fields, resolve_field_value, resolve_extra_value, rekey_extra, is_employee_category, EMPLOYEE_MAIN_COLUMNS,
     workstation_lookup_category, status_driver_column, get_builder_layout, builder_field_column,
+    builder_status_choices,
     get_list_display_fields, is_category_db_configured, get_workstation_fields,
 )
 from .sheet_templates import get_template_for_category
@@ -428,6 +429,12 @@ def _status_choices_for(category_name):
     """[(value, label), ...] of the statuses allowed for a category."""
     key = (category_name or "").strip().lower()
     labels = dict(Asset.STATUS_CHOICES)
+    if key:
+        _cat = AssetCategory.objects.filter(name__iexact=key).first()
+        if _cat is not None:
+            _bchoices, _ = builder_status_choices(_cat)
+            if _bchoices:
+                return _bchoices   # Category Builder's Status dropdown wins
     values = STATUS_VALUES_BY_CATEGORY.get(key, HARDWARE_STATUS_VALUES)
     return [(v, labels[v]) for v in values]
 
@@ -932,6 +939,51 @@ def category_detail(request, category_id):
         tag_label = _layout["labels"].get("tag_label", tag_label)
         hide_name = not _layout["show_name"]
         show_status = "status" in _layout["common_fields"]
+    name_label = "Name"
+    if cat_norm == "other asset":
+        # On this page the Asset Tag column IS the "ID" and the Name column IS
+        # the "Device Name" (that is what the old Others sheet calls them), so
+        # show just those two — not a second, duplicate ID / Device Name pair.
+        tag_label = "ID"
+        name_label = "Device Name"
+        hide_name = False
+        list_fields = [
+            f for f in list_fields
+            if re.sub(r"[^a-z0-9]+", " ", str(f.get("label") or "").lower()).strip()
+            not in ("id", "device name", "asset tag", "name")
+        ]
+    _generic_list = not (
+        is_info_register or is_employee or is_incident or is_cupboard
+        or is_project_details or is_hard_disk or is_ac or cat_norm == "it vendor"
+        or cat_norm == "other asset" or is_workstation_category(category.name)
+    )
+    if _generic_list and list_fields:
+        # Same rule the Add/Edit form uses: the field whose header is the
+        # category's ID (Monitor No, Keyboard Id, Mouse, UPS No, Bluetooth No,
+        # ...) IS the Asset Tag, and the one that is its name IS the Name.
+        # The list already draws those two as its first column(s), so they
+        # must not be drawn a second time as ordinary field columns. The
+        # column header takes the field's own label from the Field Builder.
+        from .import_utils import SHEET_HEADER_OVERRIDES, HEADER_ALIASES, LABEL_TO_FIELD, _normalize_header
+        from .sheet_templates import CATEGORY_TO_TEMPLATE
+        _ov = SHEET_HEADER_OVERRIDES.get(CATEGORY_TO_TEMPLATE.get(cat_norm), {}) or {}
+        _tag_f = _name_f = None
+        _kept = []
+        for _f in list_fields:
+            _n = _normalize_header(_f.get("label"))
+            _m = _ov.get(_n) or LABEL_TO_FIELD.get(_n) or HEADER_ALIASES.get(_n)
+            if _m == "asset_tag" and _tag_f is None:
+                _tag_f = _f
+            elif _m == "name" and _name_f is None:
+                _name_f = _f
+            else:
+                _kept.append(_f)
+        list_fields = _kept
+        if _tag_f:
+            tag_label = _tag_f["label"]
+        if _name_f:
+            name_label = _name_f["label"]
+            hide_name = False
     if is_workstation_category(category.name):
         # Workstation data lives on Workstation.extra_details under
         # WorkstationField.key. Point each list column at the matching
@@ -981,6 +1033,7 @@ def category_detail(request, category_id):
         "hide_name": hide_name,
         "show_status": show_status,
         "tag_label": tag_label,
+        "name_label": name_label,
         "is_vendor": cat_norm == "it vendor",
         "accessible_branches": accessible_branches,
         "selected_branch": selected_branch,
@@ -1102,7 +1155,7 @@ def _build_category_form_config():
                 if _normalize_header(f["label"]) == driver:
                     status_label = f["label"]
         extra_fields = []
-        if cat_norm not in (
+        if layout is not None or cat_norm not in (
                             "employee",
                             "employee list",
                             "project details",
@@ -1170,6 +1223,7 @@ def _build_category_form_config():
             "employee_form": employee_form,
             "show_name": show_name,
             "show_notes": layout["show_notes"] if layout is not None else True,
+            "core_meta": layout["core_meta"] if layout is not None else {},
             "required_common": layout["required_common"] if layout is not None else [],
             "tag_label": lbl_cfg.get("tag_label", "Asset Tag"),
             "name_label": lbl_cfg.get("name_label", "Name"),
@@ -1391,7 +1445,9 @@ def asset_detail(request, asset_id):
             return resolve_field_value(asset, f)
 
         detail_fields = [
-            {"label": f["label"], "value": _detail_value(f)}
+            {"label": f["label"], "value": _detail_value(f),
+             "width": 12 if f.get("width") == 12 else 6,
+             "type": f.get("type") or "text"}
             for f in category_fields
         ]
     is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
@@ -1558,27 +1614,38 @@ def category_delete(request, category_id):
     category = get_object_or_404(AssetCategory, pk=category_id)
     name = category.name
     problem = None
+    asset_count = 0
+    active_count = 0
     if name.strip().lower() in builtin_category_names():
         problem = "This is a built-in category used by the system, so it can't be deleted."
     else:
         asset_count = category.assets.count()
-        if asset_count:
-            problem = (f"{asset_count} asset record(s) still belong to this category "
-                       "(including deactivated ones). Move or remove them first.")
-        elif WorkstationField.objects.filter(lookup_category__iexact=name).exists():
+        active_count = category.assets.filter(is_active=True).count()
+        if WorkstationField.objects.filter(lookup_category__iexact=name).exists():
             problem = "A Workstation field links to this category. Change that field first."
     if request.method == "POST":
         if problem:
             messages.error(request, problem)
             return redirect("assets:category_detail", category_id=category.pk)
+        # Assets exist: the admin must explicitly confirm deleting them too.
+        if asset_count and request.POST.get("confirm_delete_assets") != "yes":
+            messages.error(request, "Tick the confirmation box to delete the category together with its assets.")
+            return redirect("assets:category_delete", category_id=category.pk)
         with transaction.atomic():
+            deleted_assets = category.assets.count()
+            if deleted_assets:
+                category.assets.all().delete()   # history rows cascade
             AssetField.objects.filter(category=category).delete()
             cat_id = category.pk
             category.delete()
             _log_config_change(request.user, "delete", "AssetCategory", cat_id, name, None)
-        messages.success(request, f'Category "{name}" deleted.')
+        messages.success(request, f'Category "{name}" deleted' + (f" along with {deleted_assets} asset record(s)." if deleted_assets else "."))
         return redirect("assets:dashboard")
-    return render(request, "assets/category_confirm_delete.html", {"category": category, "problem": problem})
+    return render(request, "assets/category_confirm_delete.html", {
+        "category": category, "problem": problem,
+        "asset_count": asset_count, "active_count": active_count,
+        "inactive_count": asset_count - active_count,
+    })
 
 
 @login_required
@@ -2800,6 +2867,23 @@ def category_builder(request, category_id):
 
 
 
+def _warn_unmatched_status_options(request, category, field):
+    """Tell the admin which Status dropdown options the Status column can't store."""
+    if field.field_type not in ("select", "searchable_select"):
+        return
+    if builder_field_column({"name": field.key, "label": field.label}) != "status":
+        return
+    _choices, unmatched = builder_status_choices(category)
+    if unmatched:
+        messages.warning(
+            request,
+            "Status can only use the built-in statuses (Working, Not Working, Idle, Scrap, "
+            "Missing, Under Service, Active, Inactive, Open, Resolved, Running, Stopped, "
+            "Completed, Not Set, Other). These options will not be offered: "
+            + ", ".join(unmatched) + ".",
+        )
+
+
 @login_required
 
 @superuser_required
@@ -2938,6 +3022,7 @@ def builder_field_add(request, category_id):
 
 
 
+    _warn_unmatched_status_options(request, category, field)
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
 
         return JsonResponse({
@@ -3110,6 +3195,7 @@ def builder_field_edit(request, category_id, field_id):
 
 
 
+    _warn_unmatched_status_options(request, category, field)
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
 
         return JsonResponse({"ok": True, "label": field.label, "field_id": field.pk})

@@ -581,6 +581,7 @@ def get_builder_layout(category):
     if not is_category_db_configured(category):
         return None
     common, labels, consumed, required, list_skip = [], {}, set(), [], set()
+    core_meta = {}   # builder type / width / label / options for core-column fields
     show_name = show_notes = False
     for f in get_category_fields(category):
         col = None
@@ -592,6 +593,12 @@ def get_builder_layout(category):
         if col is None:
             continue
         consumed.add(f["name"])
+        core_meta[col] = {
+            "type": f.get("type") or "text",
+            "width": 12 if f.get("width") == 12 else 6,
+            "label": f.get("label") or "",
+            "options": list(f.get("options") or []),
+        }
         if col in ("asset_tag", "name", "status"):
             list_skip.add(f["name"])   # drawn as the fixed Tag / Name / Status columns
         if col == "name":
@@ -607,7 +614,7 @@ def get_builder_layout(category):
     return {
         "common_fields": common, "labels": labels, "consumed": consumed,
         "show_name": show_name, "show_notes": show_notes, "required_common": required,
-        "list_skip": list_skip,
+        "list_skip": list_skip, "core_meta": core_meta,
     }
 
 
@@ -624,3 +631,61 @@ def _builder_bound_value(asset, field):
             val = getattr(asset, col, None)
             return "" if val is None else val
     return None
+
+
+def _norm_label(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def _status_lookup():
+    from .models import Asset  # local import: avoids app-loading order issue
+    lookup = {}
+    for value, label in Asset.STATUS_CHOICES:
+        lookup[_norm_label(value)] = value
+        lookup[_norm_label(label)] = value
+        for part in label.split("/"):
+            if _norm_label(part):
+                lookup.setdefault(_norm_label(part), value)
+    return lookup
+
+
+def builder_status_choices(category):
+    """Status dropdown options defined in the Category Builder.
+
+    Returns ([(code, label), ...], [unmatched option labels]). The Status
+    column only stores the built-in status codes, so a builder option is
+    usable when its text matches one of them (e.g. "Not Working");
+    anything else is returned in `unmatched` so the admin can be told.
+    ([], []) when the category has no builder Status dropdown."""
+    layout = get_builder_layout(category)
+    if layout is None:
+        return [], []
+    meta = layout.get("core_meta", {}).get("status")
+    if not meta or meta["type"] not in ("select", "searchable_select") or not meta["options"]:
+        return [], []
+    lookup = _status_lookup()
+    choices, unmatched, seen = [], [], set()
+    for opt in meta["options"]:
+        code = lookup.get(_norm_label(opt))
+        if code is None:
+            unmatched.append(opt)
+        elif code not in seen:
+            seen.add(code)
+            choices.append((code, opt))
+    return choices, unmatched
+
+
+def builder_core_options(category):
+    """{core_column: [option labels]} for Category-Builder dropdown fields that
+    are bound to a real Asset column (Brand, Model ...). Status is handled by
+    builder_status_choices()."""
+    layout = get_builder_layout(category)
+    if layout is None:
+        return {}
+    out = {}
+    for col, meta in layout.get("core_meta", {}).items():
+        if col in ("status", "asset_tag", "name"):
+            continue
+        if meta["type"] in ("select", "searchable_select") and meta["options"]:
+            out[col] = {"label": meta["label"], "options": list(meta["options"])}
+    return out

@@ -99,12 +99,12 @@
                     <th>Serviced</th>
                     {% elif is_info_register %}
                     <th>{{ tag_label }}</th>
-                    {% if not hide_name %}<th>Name</th>{% endif %}
+                    {% if not hide_name %}<th>{{ name_label|default:"Name" }}</th>{% endif %}
                     <th>Status</th>
                     {% if list_summary_field %}<th>{{ list_summary_field.label }}</th>{% endif %}
                     {% elif has_dynamic_fields %}
                     <th>{{ tag_label }}</th>
-                    {% if not hide_name %}<th>Name</th>{% endif %}
+                    {% if not hide_name %}<th>{{ name_label|default:"Name" }}</th>{% endif %}
                     {% for f in list_fields %}
                     <th>{{ f.label }}</th>
                     {% endfor %}

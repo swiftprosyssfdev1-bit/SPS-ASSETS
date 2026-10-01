@@ -558,11 +558,74 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 
+
+    // Core columns (Brand, Notes, Model ...) are real Asset fields, but the
+    // Category Builder's Type / Width / Label for them must still win.
+    const CORE_WRAPS = {};
+    document.querySelectorAll('[data-common-field]').forEach(function (el) {
+        CORE_WRAPS[el.dataset.commonField] = el;
+    });
+    const _notesWrap = document.getElementById('field-wrap-notes');
+    if (_notesWrap) CORE_WRAPS['notes'] = _notesWrap;
+    const CORE_ORIG = {};
+    Object.keys(CORE_WRAPS).forEach(function (k) {
+        CORE_ORIG[k] = { cls: CORE_WRAPS[k].className, html: CORE_WRAPS[k].innerHTML };
+    });
+
+    const CORE_DIRTY = {};
+    function restoreCoreFields() {
+        Object.keys(CORE_DIRTY).forEach(function (k) {
+            delete CORE_DIRTY[k];
+            CORE_WRAPS[k].className = CORE_ORIG[k].cls;
+            CORE_WRAPS[k].innerHTML = CORE_ORIG[k].html;
+        });
+    }
+
+    function applyCoreMeta(meta) {
+        restoreCoreFields();
+        Object.keys(meta || {}).forEach(function (col) {
+            const wrap = CORE_WRAPS[col];
+            const m = meta[col];
+            if (col === 'status') return;   // status options are mapped to status codes server-side
+            if (!wrap || !m) return;
+            CORE_DIRTY[col] = true;
+            wrap.className = wrap.className.replace(/\bcol-md-(6|12)\b|\bcol-12\b/g, '').trim() +
+                             ' ' + (m.width === 12 ? 'col-12' : 'col-md-6');
+            const lbl = wrap.querySelector('label');
+            if (lbl && m.label) lbl.textContent = m.label;
+            const ctl = wrap.querySelector('input:not([type=hidden]), select, textarea');
+            if (!ctl) return;
+            const name = ctl.name, id = ctl.id, value = ctl.value;
+            let html = '';
+            if (m.type === 'select' || m.type === 'searchable_select') {
+                let opts = '<option value="">\u2014</option>', found = false;
+                const vnorm = String(value || '').trim().toLowerCase();
+                (m.options || []).forEach(function (o) {
+                    const sel = !found && vnorm !== '' && String(o).trim().toLowerCase() === vnorm;
+                    if (sel) found = true;
+                    opts += '<option value="' + escapeAttr(o) + '"' + (sel ? ' selected' : '') + '>' + escapeAttr(o) + '</option>';
+                });
+                // keep a saved legacy value that is not in the option list
+                if (value && !found) opts += '<option value="' + escapeAttr(value) + '" selected>' + escapeAttr(value) + '</option>';
+                html = '<select name="' + name + '" id="' + id + '" class="form-select">' + opts + '</select>';
+            } else if (m.type === 'textarea') {
+                if (ctl.tagName === 'TEXTAREA') return;
+                html = '<textarea name="' + name + '" id="' + id + '" class="form-control" rows="3">' + escapeAttr(value) + '</textarea>';
+            } else {
+                const t = {date: 'date', number: 'number', email: 'email', url: 'url'}[m.type] || 'text';
+                if (ctl.tagName === 'INPUT') { ctl.type = t; return; }
+                html = '<input type="' + t + '" name="' + name + '" id="' + id + '" class="form-control" value="' + escapeAttr(value) + '">';
+            }
+            ctl.outerHTML = html;
+        });
+    }
+
     function applyCategory(categoryId, preserveValues) {
 
         const cfg = CONFIG[categoryId];
 
         setStatusChoices(cfg, preserveValues);
+        applyCoreMeta(cfg ? cfg.core_meta : null);
 
 
 

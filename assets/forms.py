@@ -73,6 +73,20 @@ class AssetForm(forms.ModelForm):
             else:
                 cleaned_data["name"] = "Asset"
 
+        # Core columns (Brand, Model ...) the Category Builder made a Dropdown:
+        # only its options (or the value already saved) may be submitted.
+        if category is not None:
+            from .category_fields import builder_core_options
+            for col, info in builder_core_options(category).items():
+                value = (cleaned_data.get(col) or "").strip()
+                if not value:
+                    continue
+                allowed = {str(o).strip().lower(): o for o in info["options"]}
+                if value.lower() in allowed:
+                    cleaned_data[col] = allowed[value.lower()]
+                elif not (self.instance.pk and value == (getattr(self.instance, col, "") or "")):
+                    self.add_error(col, f"Choose one of the {info['label']} options.")
+
         was_inactive = self.instance.pk and not self.instance.is_active
         is_superuser = bool(self._user is not None and self._user.is_superuser)
         if was_inactive and cleaned_data.get("is_active") and not is_superuser:

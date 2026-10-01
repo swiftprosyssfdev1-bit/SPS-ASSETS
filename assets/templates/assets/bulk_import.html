@@ -60,10 +60,10 @@
             {% endfor %}
         </div>
         <ul class="mb-4 ps-3">
-            <li><strong>Required:</strong> Category, Asset Tag and Name. All other columns are optional.</li>
+            <li><strong>Required:</strong> Category, Asset Tag, Name, and any fields marked as required in the Category Builder. Other columns are optional.</li>
             <li><strong>Category</strong> must match an existing category name (upper/lower case does not matter).</li>
             <li><strong>Asset Tag</strong> must be unique. It cannot already exist in the system or repeat within the file.</li>
-            <li><strong>Status</strong> can be Working, Not Working, Idle, Scrap, Missing or Under Service. Blank means Working.</li>
+            <li><strong>Status</strong> accepts any valid status for the chosen category (e.g., Working, Active, Open, etc.). Blank defaults to Working.</li>
             <li><strong>Dates</strong> work best as <code>YYYY-MM-DD</code> (e.g. 2025-01-15). <code>DD-MM-YYYY</code> and <code>DD/MM/YYYY</code> are also accepted.</li>
         </ul>
 
