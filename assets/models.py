@@ -115,27 +115,27 @@ class Asset(models.Model):
                    "Edit page.",
     )
     asset_tag = models.CharField(
-        max_length=50, unique=True,
+        max_length=255, unique=True,
         help_text="Unique ID, e.g. WS001, M009, K014, U006"
     )
-    name = models.CharField(max_length=150, db_index=True, help_text="Short display name")
-    brand = models.CharField(max_length=100, blank=True, db_index=True)
-    model_number = models.CharField(max_length=100, blank=True, db_index=True)
-    serial_number = models.CharField(max_length=150, blank=True, db_index=True)
+    name = models.CharField(max_length=255, db_index=True, help_text="Short display name")
+    brand = models.CharField(max_length=255, blank=True, db_index=True)
+    model_number = models.CharField(max_length=255, blank=True, db_index=True)
+    serial_number = models.CharField(max_length=255, blank=True, db_index=True)
 
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="working", db_index=True)
+    status = models.CharField(max_length=150, default="working", db_index=True)
 
-    current_assigned_to = models.CharField(max_length=150, blank=True, db_index=True, help_text="Current user / employee / location")
-    current_location = models.CharField(max_length=150, blank=True, db_index=True)
+    current_assigned_to = models.CharField(max_length=255, blank=True, db_index=True, help_text="Current user / employee / location")
+    current_location = models.CharField(max_length=255, blank=True, db_index=True)
 
-    previous_assigned_to = models.CharField(max_length=150, blank=True)
-    previous_location = models.CharField(max_length=150, blank=True)
+    previous_assigned_to = models.CharField(max_length=255, blank=True)
+    previous_location = models.CharField(max_length=255, blank=True)
 
     purchase_date = models.DateField(null=True, blank=True)
     last_service_date = models.DateField(null=True, blank=True)
 
     linked_workstation = models.CharField(
-        max_length=50, blank=True, db_index=True,
+        max_length=255, blank=True, db_index=True,
         help_text="Workstation ID this item is used in, e.g. WS004 (optional)"
     )
 
@@ -158,6 +158,11 @@ class Asset(models.Model):
             models.Index(fields=["category", "is_active"]),
             models.Index(fields=["branch", "is_active"]),
         ]
+
+    def get_status_display(self):
+        """Returns the human-readable label for the current status.
+        Falls back to the raw status code if it's a custom Category Builder status."""
+        return dict(self.STATUS_CHOICES).get(self.status, self.status)
 
     def __str__(self):
         return f"{self.asset_tag} - {self.name}"
@@ -317,6 +322,7 @@ class AssetField(models.Model):
     show_in_edit = models.BooleanField(default=True)
     display_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    max_length = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -340,6 +346,7 @@ class AssetField(models.Model):
             "required": self.required,
             "placeholder": self.placeholder,
             "help_text": self.help_text,
+            "max_length": self.max_length,
             "show_in_list": self.show_in_list,
             "show_in_detail": self.show_in_detail,
             "show_in_add": self.show_in_add,
@@ -512,14 +519,12 @@ class WorkstationField(models.Model):
     show_in_edit = models.BooleanField(default=True)
     display_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    max_length = models.PositiveIntegerField(null=True, blank=True)
 
     # Only meaningful when field_type == "lookup":
-    lookup_category = models.CharField(
-        max_length=100, blank=True,
-        help_text="AssetCategory name this field searches against, e.g. "
-                   "'CPU / System Unit', 'Monitor', 'Employee'. Required for "
-                   "Lookup fields — the same searchable-combo-box behaviour "
-                   "Workstation's CPU/Monitor/etc. fields already have today.",
+    lookup_category = models.ForeignKey(
+        AssetCategory, null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        help_text="AssetCategory this field searches against. Required for Lookup fields.",
     )
     lookup_multi = models.BooleanField(
         default=False,
@@ -547,11 +552,12 @@ class WorkstationField(models.Model):
             "required": self.required,
             "placeholder": self.placeholder,
             "help_text": self.help_text,
+            "max_length": self.max_length,
             "show_in_list": self.show_in_list,
             "show_in_detail": self.show_in_detail,
             "show_in_add": self.show_in_add,
             "show_in_edit": self.show_in_edit,
-            "lookup_category": self.lookup_category,
+            "lookup_category": self.lookup_category_id,
             "lookup_multi": self.lookup_multi,
         }
         if self.field_type in ("select", "searchable_select"):

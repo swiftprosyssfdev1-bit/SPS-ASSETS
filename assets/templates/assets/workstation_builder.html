@@ -235,7 +235,7 @@
                     </div>
                     <div class="f-actions">
                         <button class="icon-btn" title="Edit"
-                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, '{{ f.lookup_category|escapejs }}', {{ f.lookup_multi|yesno:'true,false' }}, '{{ f.options_text|escapejs }}')">
+                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, '{{ f.max_length|default_if_none:"" }}', '{{ f.lookup_category_id|default_if_none:"" }}', {{ f.lookup_multi|yesno:'true,false' }}, '{{ f.options_text|escapejs }}')">
                             <i class="bi bi-pencil"></i>
                         </button>
                         {% if f.is_active %}
@@ -348,7 +348,7 @@
                                         <select name="lookup_category" class="form-select">
                                             <option value="">— choose —</option>
                                             {% for c in category_choices %}
-                                            <option value="{{ c.name }}">{{ c.name }}</option>
+                                            <option value="{{ c.pk }}">{{ c.name }}</option>
                                             {% endfor %}
                                         </select>
                                     </div>
@@ -376,6 +376,10 @@
                                 <option value="false" selected>Optional</option>
                                 <option value="true">Required</option>
                             </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Max Length</label>
+                            <input type="number" name="max_length" class="form-control" placeholder="Optional">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label fw-semibold">Placeholder</label>
@@ -445,7 +449,7 @@
                                         <select name="lookup_category" id="edit-lookup-category" class="form-select">
                                             <option value="">— choose —</option>
                                             {% for c in category_choices %}
-                                            <option value="{{ c.name }}">{{ c.name }}</option>
+                                            <option value="{{ c.pk }}">{{ c.name }}</option>
                                             {% endfor %}
                                         </select>
                                     </div>
@@ -473,6 +477,10 @@
                                 <option value="false">Optional</option>
                                 <option value="true">Required</option>
                             </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Max Length</label>
+                            <input type="number" name="max_length" id="edit-max-length" class="form-control" placeholder="Optional">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label fw-semibold">Placeholder</label>
@@ -518,13 +526,14 @@ function toggleFieldType(sel, prefix) {
     document.getElementById(prefix + '-lookup-group').style.display = sel.value === 'lookup' ? '' : 'none';
 }
 
-function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, lookupCategory, lookupMulti, optionsText) {
+function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, maxLength, lookupCategory, lookupMulti, optionsText) {
     document.getElementById('edit-label').value = label;
     var ftSel = document.getElementById('edit-field-type');
     ftSel.value = ftype;
     toggleFieldType(ftSel, 'edit');
     document.getElementById('edit-width').value = String(width);
     document.getElementById('edit-required').value = required ? 'true' : 'false';
+    document.getElementById('edit-max-length').value = maxLength || '';
     document.getElementById('edit-placeholder').value = placeholder;
     document.getElementById('edit-help-text').value = helpText;
     document.getElementById('sil_edit').checked = sil;

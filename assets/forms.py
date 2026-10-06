@@ -2,8 +2,11 @@ from django import forms
 from django.contrib.auth import get_user_model
 
 from .models import Asset, AssetCategory, Branch
+from .naming import refreshed_name
 
 User = get_user_model()
+
+
 
 
 class AssetForm(forms.ModelForm):
@@ -63,15 +66,17 @@ class AssetForm(forms.ModelForm):
         brand = cleaned_data.get("brand")
         model_number = cleaned_data.get("model_number")
         asset_tag = cleaned_data.get("asset_tag")
-        if not name or not name.strip():
-            if brand:
-                cleaned_data["name"] = f"{brand} {model_number or ''}".strip() or brand
-            elif category and asset_tag:
-                cleaned_data["name"] = f"{category.name} {asset_tag}"
-            elif category:
-                cleaned_data["name"] = f"{category.name}"
-            else:
-                cleaned_data["name"] = "Asset"
+        # Names are generated automatically (see naming.py): a blank name is
+        # generated, and a name that is still the auto-generated one follows
+        # the record when its Tag / Brand / Model / Category is edited. At this
+        # point self.instance still holds the SAVED values (the form copies the
+        # submitted ones onto it later), so it gives the "before".
+        new_inputs = (category.name if category else "", asset_tag, brand, model_number)
+        old_inputs = new_inputs
+        if self.instance.pk and self.instance.category_id:
+            inst = self.instance
+            old_inputs = (inst.category.name, inst.asset_tag, inst.brand, inst.model_number)
+        cleaned_data["name"] = refreshed_name(name, old_inputs, new_inputs)
 
         # Core columns (Brand, Model ...) the Category Builder made a Dropdown:
         # only its options (or the value already saved) may be submitted.
@@ -92,6 +97,13 @@ class AssetForm(forms.ModelForm):
         if was_inactive and cleaned_data.get("is_active") and not is_superuser:
             self.add_error("is_active", "Only the Super Admin can reactivate a deactivated asset.")
         return cleaned_data
+
+    def clean_status(self):
+        # The status dropdown choices are injected at request time by
+        # _status_form_setup() and may include custom Category Builder
+        # statuses (e.g. "Resigned") that are not in STATUS_CHOICES.
+        # Return the raw submitted value to skip widget-level choice validation.
+        return self.data.get("status", "")
 
     def clean_branch(self):
         branch = self.cleaned_data.get("branch")

@@ -26,16 +26,6 @@ CATEGORY_FIELDS = {
         {"name": "capacity_size", "label": "Capacity / Size", "type": "text"},
         {"name": "condition_notes", "label": "Condition / Notes", "type": "text"},
     ],
-    # Air Conditioner: legacy imported rows dumped everything (including
-    # capacity + install location) into the "Others" sheet's raw Status/
-    # Details columns (see category_detail.html / asset_detail view for how
-    # those get displayed for existing rows). Going forward, new/edited
-    # assets get one clean field for that instead of reusing the Status
-    # dropdown for it — real Status/Brand/Location/Last Service Date stay
-    # as normal common fields (see get_common_fields below).
-    "air conditioner": [
-        {"name": "capacity_location", "label": "Capacity / Location", "type": "text"},
-    ],
 }
 
 
@@ -254,8 +244,6 @@ def get_common_fields(category):
     if category is None:
         return DEFAULT_COMMON_FIELDS
     cat_name = category.name if hasattr(category, "name") else str(category or "")
-    if cat_name.strip().lower() == "air conditioner":
-        return ["status", "brand", "current_location", "last_service_date"]
     if status_driver_column(category) or cat_name.strip().lower() in STATUS_ONLY_CATEGORIES:
         return ["status"]
     if get_category_fields(category):
@@ -493,6 +481,19 @@ def resolve_field_value(asset, field):
     lbl = _norm_key(label)
     if not lbl:
         return ""
+    # Other Asset: the list page treats the Asset Tag as "ID" and the Name as
+    # "Device Name"; Inside Cupboard rows keep their type under "Item Type".
+    # Read those real values here when the field has nothing stored itself.
+    if str(getattr(asset.category, "name", "") or "").strip().lower() == "other asset":
+        if lbl == "id" and asset.asset_tag:
+            return asset.asset_tag
+        if lbl == "devicename" and asset.name:
+            return asset.name
+        if lbl == "devicetype":
+            _extra = getattr(asset, "extra_details", None) or {}
+            for _k, _v in _extra.items():
+                if _norm_key(_k) == "itemtype" and str(_v or "").strip():
+                    return _v
     bound = _builder_bound_value(asset, field)
     if bound is not None:
         return bound
@@ -541,8 +542,11 @@ def resolve_field_value(asset, field):
 # Nothing generic (Name, Status, Location, Notes ...) is shown unless the
 # builder has a field for it.
 _BUILDER_COLUMN_MAP = {
-    "tag": "asset_tag", "asset tag": "asset_tag", "asset id": "asset_tag", "asset tag id": "asset_tag",
-    "name": "name",
+    "tag": "asset_tag", "asset tag": "asset_tag", "asset id": "asset_tag", "asset tag id": "asset_tag", "id": "asset_tag",
+    # Employee category: camelCase key "employeename" normalises without a space separator,
+    # and "Employee Id" / key "employee_id" normalises to "employee id" → asset_tag.
+    "employeename": "name", "employee id": "asset_tag",
+    "name": "name", "device name": "name",
     "brand": "brand",
     "model": "model_number", "model no": "model_number", "model number": "model_number",
     "serial": "serial_number", "serial no": "serial_number", "serial number": "serial_number",
@@ -652,10 +656,10 @@ def _status_lookup():
 def builder_status_choices(category):
     """Status dropdown options defined in the Category Builder.
 
-    Returns ([(code, label), ...], [unmatched option labels]). The Status
-    column only stores the built-in status codes, so a builder option is
-    usable when its text matches one of them (e.g. "Not Working");
-    anything else is returned in `unmatched` so the admin can be told.
+    Returns ([(code, label), ...], []). The Status column now supports custom 
+    statuses, so any option text is accepted directly as a status code. For 
+    compatibility, if an option text matches an old built-in status (e.g. 
+    "Not Working"), it will map to the legacy code (e.g. "not_working").
     ([], []) when the category has no builder Status dropdown."""
     layout = get_builder_layout(category)
     if layout is None:
@@ -666,10 +670,13 @@ def builder_status_choices(category):
     lookup = _status_lookup()
     choices, unmatched, seen = [], [], set()
     for opt in meta["options"]:
+        # If it matches an old legacy code, use it to preserve compatibility,
+        # otherwise just use the option label directly as the custom status!
         code = lookup.get(_norm_label(opt))
         if code is None:
-            unmatched.append(opt)
-        elif code not in seen:
+            code = opt  # Custom status
+        
+        if code not in seen:
             seen.add(code)
             choices.append((code, opt))
     return choices, unmatched

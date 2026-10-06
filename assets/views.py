@@ -37,7 +37,12 @@ from .category_fields import (
     builder_status_choices,
     get_list_display_fields, is_category_db_configured, get_workstation_fields,
 )
+from .naming import generate_asset_name
 from .sheet_templates import get_template_for_category
+from .display import (
+    build_detail_fields, build_export_cells, build_export_columns, build_list_cells,
+    build_list_columns, detail_heading_shows_name,
+)
 from .import_utils import (
     IMPORT_COLUMNS, ImportFileError, parse_uploaded_file, validate_rows,
     parse_uploaded_workbook_sheets, validate_workbook_sheets,
@@ -164,8 +169,7 @@ def _is_hand_built_category(category):
     """Categories whose list / View / export are still hand-built (not driven
     by the Category Builder yet)."""
     n = category.name.strip().lower()
-    return (n in ("air conditioner", "inside cupboard", "inside the cupboard", "hard disk")
-            or is_employee_category(category.name) or is_workstation_category(category.name))
+    return is_workstation_category(category.name)
 
 
 def _dashboard_card_sort_key(cat):
@@ -460,25 +464,12 @@ def _status_form_setup(form, category=None, instance=None):
     elif current and same_category and current not in allowed:
         choices.append((current, dict(Asset.STATUS_CHOICES).get(current, current)))
     form.fields["status"].choices = choices
+    # Sync widget.choices too — the Select widget validates submitted values
+    # against its own choices list independently of the field-level choices.
+    form.fields["status"].widget.choices = choices
     if instance is None:
         form.initial.setdefault("status", choices[0][0])
 
-
-def _sync_employee_extra_details(asset, extra, old_status=None):
-    """Keep the Employee sheet columns (EmployeeName / Employee Id / Status)
-    in step with the form's Name / Employee ID / Status, so the table and the
-    Excel export show what was just typed."""
-    for f in get_category_fields(asset.category):
-        label = re.sub(r"\s+", "", f["label"]).lower()
-        if label == "employeename":
-            extra[f["name"]] = asset.name
-        elif label == "employeeid":
-            extra[f["name"]] = asset.asset_tag
-        elif label == "status":
-            # keep original wording (e.g. "Resigned") unless the status changed
-            if not extra.get(f["name"]) or old_status != asset.status:
-                extra[f["name"]] = asset.get_status_display()
-    return extra
 
 
 def _sync_status_column(asset, extra, old_status=None):
@@ -659,7 +650,7 @@ def workstation_asset_add(request):
             with transaction.atomic():
                 asset = Asset.objects.create(
                     category=category, branch=branch, asset_tag=asset_tag,
-                    name=f"Workstation {asset_tag}", status=status, notes=notes,
+                    name=generate_asset_name("Workstation", asset_tag), status=status, notes=notes,
                     updated_by=request.user,
                 )
                 Workstation.objects.create(
@@ -795,7 +786,7 @@ def _create_workstation_rows(request, rows, import_branch):
             with transaction.atomic():
                 asset = Asset.objects.create(
                     category=category, branch=branch, asset_tag=tag,
-                    name=f"Workstation {tag}", status=f.get("status", "working"),
+                    name=generate_asset_name("Workstation", tag), status=f.get("status", "working"),
                     notes=f.get("notes", ""), updated_by=request.user,
                 )
                 Workstation.objects.create(asset=asset, extra_details=extra, unresolved=unresolved)
@@ -921,12 +912,8 @@ def category_detail(request, category_id):
 
     cat_norm = category.name.strip().lower()
     is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
-    is_employee = cat_norm in ("employee", "employee list")
     is_incident = cat_norm == "incident register"
-    is_cupboard = cat_norm in ("inside cupboard", "inside the cupboard")
     is_project_details = cat_norm == "project details"
-    is_hard_disk = cat_norm == "hard disk"
-    is_ac = cat_norm == "air conditioner"
     hide_name = cat_norm in NO_REAL_NAME_CATEGORIES
     tag_label = TAG_LABEL_OVERRIDES.get(cat_norm, "Tag")
     category_fields = get_category_fields(category)
@@ -953,8 +940,8 @@ def category_detail(request, category_id):
             not in ("id", "device name", "asset tag", "name")
         ]
     _generic_list = not (
-        is_info_register or is_employee or is_incident or is_cupboard
-        or is_project_details or is_hard_disk or is_ac or cat_norm == "it vendor"
+        is_info_register or is_incident
+        or is_project_details or cat_norm == "it vendor"
         or cat_norm == "other asset" or is_workstation_category(category.name)
     )
     if _generic_list and list_fields:
@@ -1011,25 +998,50 @@ def category_detail(request, category_id):
     # air conditioner, info-register) keep that dedicated branch untouched.
     has_dynamic_fields = bool(list_fields)
 
-    list_summary_field = _list_summary_field(category, category_fields) if (is_info_register and not is_employee and not is_incident and not is_project_details) else None
+    list_summary_field = _list_summary_field(category, category_fields) if (is_info_register and not is_incident and not is_project_details) else None
 
     if is_workstation_category(category.name) and list_summary_field:
         list_summary_field = _fix_summary(list_summary_field)
     assets = prime_display_tags(assets)
+
+    # Category Builder is the single source of truth for a builder-configured
+    # category: its active fields (order, labels, List visibility) ARE the
+    # columns (see display.py). None = no builder fields -> legacy layout.
+    list_columns = None
+    if not is_workstation_category(category.name):
+        list_columns = build_list_columns(category, default_tag_label=tag_label)
+    show_branch_column = selected_branch is None
+    if list_columns:
+        link_key = list_summary_field["name"] if list_summary_field else None
+        from .relations import resolve_asset_reference
+        assets = list(assets)
+        for _a in assets:
+            _a.list_cells = build_list_cells(
+                _a, list_columns, link_key=link_key,
+                resolver=lambda v: resolve_asset_reference(v, None),
+            )
+        # columns + Branch (when shown) + Actions
+        column_count = len(list_columns) + (1 if show_branch_column else 0) + 1
+    else:
+        column_count = 8
+    # These flags are only needed by the template's LEGACY fallback branches
+    # (the hand-built table headers for when list_columns is None). Once a
+    # category has builder fields, list_columns is non-None and these flags
+    # are never consulted by the template. Keeping them here preserves the
+    # existing HTML layout for categories that have no builder fields yet.
+    _no_builder = list_columns is None
     return render(request, "assets/category_detail.html", {
         "category": category,
         "assets": assets,
+        "list_columns": list_columns,
+        "column_count": column_count,
         "category_fields": category_fields,
         "list_fields": list_fields,
         "has_dynamic_fields": has_dynamic_fields,
         "list_summary_field": list_summary_field,
         "is_info_register": is_info_register,
-        "is_employee": is_employee,
         "is_incident": is_incident,
-        "is_cupboard": is_cupboard,
         "is_project_details": is_project_details,
-        "is_hard_disk": is_hard_disk,
-        "is_ac": is_ac,
         "hide_name": hide_name,
         "show_status": show_status,
         "tag_label": tag_label,
@@ -1038,7 +1050,7 @@ def category_detail(request, category_id):
         "accessible_branches": accessible_branches,
         "selected_branch": selected_branch,
         "is_super_admin": is_super_admin(request.user),
-        "show_branch_column": selected_branch is None,
+        "show_branch_column": show_branch_column,
     })
 
 
@@ -1117,6 +1129,10 @@ def _extra_details_valid(form, request, category, mode="add", existing_extra=Non
             opts = f.get("options") or []
             if opts and val not in opts and val != str(existing_extra.get(name, "")):
                 err = f"{label}: choose a valid option."
+        
+        if not err and f.get("max_length") and len(val) > f["max_length"]:
+            err = f"{label} cannot exceed {f['max_length']} characters."
+            
         if err:
             form.add_error(None, err)
             ok = False
@@ -1135,7 +1151,6 @@ def _build_category_form_config():
     config = {}
     for cat in AssetCategory.objects.all():
         cat_norm = cat.name.strip().lower()
-        employee_form = cat_norm in {"employee", "employee list"}
         lbl_cfg = get_category_field_labels(cat.name)
         common_fields = get_common_fields(cat.name)
         layout = get_builder_layout(cat)
@@ -1220,7 +1235,6 @@ def _build_category_form_config():
             "status_label": status_label,
             "common_fields": common_fields,
             "extra_fields": extra_fields,
-            "employee_form": employee_form,
             "show_name": show_name,
             "show_notes": layout["show_notes"] if layout is not None else True,
             "core_meta": layout["core_meta"] if layout is not None else {},
@@ -1231,7 +1245,7 @@ def _build_category_form_config():
             "location_label": lbl_cfg.get("location_label", "Current Location"),
             "assigned_label": lbl_cfg.get("assigned_label", "Current Assigned To"),
             "model_label": lbl_cfg.get("model_label", "Model Number"),
-            "asset_tag_help": "" if employee_form else "Unique ID",
+            "asset_tag_help": "Unique ID",
         }
     return config
 
@@ -1256,7 +1270,6 @@ def asset_create(request):
         initial["branch"] = accessible_branches.first().pk
     category_fields = get_category_fields(category)
     cat_key = category.name.strip().lower() if category else ""
-    employee_form = cat_key in {"employee", "employee list"}
     is_info_register = cat_key in INFO_REGISTER_CATEGORIES
 
     if request.method == "POST":
@@ -1266,15 +1279,10 @@ def asset_create(request):
             asset = form.save(commit=False)
             asset.updated_by = request.user
             if not asset.name or not asset.name.strip():
-                if asset.brand:
-                    asset.name = f"{asset.brand} {asset.model_number}".strip() or asset.brand
-                else:
-                    asset.name = f"{asset.category.name} {asset.asset_tag}"
+                asset.name = generate_asset_name(
+                    asset.category.name, asset.asset_tag, asset.brand, asset.model_number)
             asset.extra_details = _extract_extra_details(request, asset.category)
-            if employee_form:
-                asset.extra_details = _sync_employee_extra_details(asset, asset.extra_details)
-            else:
-                asset.extra_details = _sync_status_column(asset, asset.extra_details)
+            asset.extra_details = _sync_status_column(asset, asset.extra_details)
             asset.extra_details = _sync_project_details(asset, asset.extra_details)
             asset.save()
             messages.success(request, f"Asset {asset.asset_tag} added.")
@@ -1286,7 +1294,7 @@ def asset_create(request):
     return render(request, "assets/asset_form.html", {
         "form": form, "title": f"Add {category.name}" if category else "Add Asset",
         "category": category, "category_fields": category_fields,
-        "employee_form": employee_form, "is_info_register": is_info_register,
+        "is_info_register": is_info_register,
         "workstation_lookup_category": workstation_lookup_category,
         "is_workstation": cat_key == "workstation",
         "category_form_config": _build_category_form_config(),
@@ -1302,7 +1310,6 @@ def asset_update(request, asset_id):
 
     category_fields = get_category_fields(asset.category)
     cat_key = asset.category.name.strip().lower()
-    employee_form = cat_key in {"employee", "employee list"}
     is_info_register = cat_key in INFO_REGISTER_CATEGORIES
     old_status = asset.status
 
@@ -1315,19 +1322,11 @@ def asset_update(request, asset_id):
             require_branch_access(request.user, updated.branch)
             updated.updated_by = request.user
             if not updated.name or not updated.name.strip():
-                if updated.brand:
-                    updated.name = f"{updated.brand} {updated.model_number}".strip() or updated.brand
-                else:
-                    updated.name = f"{updated.category.name} {updated.asset_tag}"
+                updated.name = generate_asset_name(
+                    updated.category.name, updated.asset_tag, updated.brand, updated.model_number)
             category_fields = get_category_fields(updated.category)
             updated.extra_details = _extract_extra_details(request, updated.category, existing_extra=rekey_extra(asset.category, asset.extra_details))
-            if employee_form:
-                # keep values of the (hidden) sheet columns that the form doesn't post
-                merged = rekey_extra(asset.category, Asset.objects.get(pk=asset.pk).extra_details)
-                merged.update({k: v for k, v in updated.extra_details.items() if v != ""})
-                updated.extra_details = _sync_employee_extra_details(updated, merged, old_status)
-            else:
-                updated.extra_details = _sync_status_column(updated, updated.extra_details, old_status)
+            updated.extra_details = _sync_status_column(updated, updated.extra_details, old_status)
             updated.extra_details = _sync_project_details(updated, updated.extra_details)
             updated.save()
             messages.success(request, f"Asset {updated.asset_tag} updated.")
@@ -1339,7 +1338,7 @@ def asset_update(request, asset_id):
     return render(request, "assets/asset_form.html", {
         "form": form, "title": f"Edit Asset — {asset.asset_tag}", "asset": asset,
         "category": asset.category, "category_fields": category_fields,
-        "employee_form": employee_form, "is_info_register": is_info_register,
+        "is_info_register": is_info_register,
         "workstation_lookup_category": workstation_lookup_category,
         "is_workstation": cat_key == "workstation",
         "category_form_config": _build_category_form_config(),
@@ -1385,6 +1384,8 @@ def _resolve_back_link(request, default_url, default_label):
         return back, "Back to Dashboard"
     elif name == "search_assets":
         return back, "Back to Search"
+    elif name == "workstation_list":
+        return back, "Back to " + workstation_labels()[0]
     return default_url, default_label
 
 
@@ -1405,51 +1406,45 @@ def asset_detail(request, asset_id):
     show_status = True
 
     # Hand-built categories keep their own layout for now.
-    hand_built = (
-        cat_norm in ("air conditioner", "inside cupboard", "inside the cupboard", "hard disk")
-        or is_employee_category(asset.category.name)
-        or is_workstation_category(asset.category.name)
-    )
+    hand_built = is_workstation_category(asset.category.name)
     layout = None if hand_built else get_builder_layout(asset.category)
 
-    if cat_norm == "air conditioner":
-        # New/edited rows store this cleanly under "capacity_location"
-        # (see category_fields.CATEGORY_FIELDS). Rows still on their
-        # original import keep the raw "Status"/"Details" columns mirrored
-        # from the old "Others" sheet template - fall back to those so
-        # nothing already in the database looks blank.
-        capacity_location = asset.extra_details.get("capacity_location") or asset.extra_details.get("Status", "")
-        serviced = asset.last_service_date or asset.extra_details.get("Details", "")
-        detail_fields = [
-            {"label": "Capacity / Location", "value": capacity_location},
-            {"label": "Serviced", "value": serviced},
-        ]
-    else:
-        category_fields = get_category_fields(asset.category)
-        driver = status_driver_column(asset.category)
+    category_fields = get_category_fields(asset.category)
+    driver = status_driver_column(asset.category)
 
-        if layout is not None:
-            builder_mode = True
-            show_name = layout["show_name"]
-            show_status = "status" in layout["common_fields"]
-            # Tag / Name / Status are drawn in the heading + overview, not repeated in Details
-            category_fields = [f for f in category_fields if f["name"] not in layout["list_skip"]]
+    if layout is not None:
+        builder_mode = True
+        show_name = layout["show_name"]
+        show_status = "status" in layout["common_fields"]
+        # Tag / Name / Status are drawn in the heading + overview, not repeated in Details
+        category_fields = [f for f in category_fields if f["name"] not in layout["list_skip"]]
 
-        def _detail_value(f):
-            # the Status/Condition column shows the real status, not the
-            # (possibly empty / stale) imported text copy
-            if driver and _normalize_header(f["label"]) == driver:
-                return asset.get_status_display()
-            # extra_details (any old-key spelling), then the asset's own
-            # columns - see category_fields.resolve_field_value
-            return resolve_field_value(asset, f)
+    def _detail_value(f):
+        # the Status/Condition column shows the real status, not the
+        # (possibly empty / stale) imported text copy
+        if driver and _normalize_header(f["label"]) == driver:
+            return asset.get_status_display()
+        # extra_details (any old-key spelling), then the asset's own
+        # columns - see category_fields.resolve_field_value
+        return resolve_field_value(asset, f)
 
-        detail_fields = [
-            {"label": f["label"], "value": _detail_value(f),
-             "width": 12 if f.get("width") == 12 else 6,
-             "type": f.get("type") or "text"}
-            for f in category_fields
-        ]
+    detail_fields = [
+        {"label": f["label"], "value": _detail_value(f),
+         "width": 12 if f.get("width") == 12 else 6,
+         "type": f.get("type") or "text"}
+        for f in category_fields
+    ]
+
+    # A category configured in the Category Builder follows the builder
+    # exactly (order, labels, Detail visibility) - see display.py. This
+    # replaces the hand-built / legacy layouts above for those categories.
+    built_fields = None if is_workstation_category(asset.category.name) else build_detail_fields(asset)
+    if built_fields is not None:
+        detail_fields = built_fields
+        builder_mode = True
+        show_name = detail_heading_shows_name(asset) or cat_norm == "other asset"
+        # Status is shown in the overview only when the builder doesn't list it
+        show_status = not any(f.get("kind") == "status" for f in built_fields)
     is_info_register = cat_norm in INFO_REGISTER_CATEGORIES
 
     from .relations import get_forward_relationships, get_reverse_relationships
@@ -1512,6 +1507,8 @@ def asset_lookup(request):
 
     if category_name.strip().lower() == "employee":
         category_q = Q(category__name__in=["Employee", "Employee List"])
+    elif category_name.isdigit():
+        category_q = Q(category_id=int(category_name))
     else:
         category_q = Q(category__name__iexact=category_name)
 
@@ -1593,10 +1590,6 @@ def category_edit(request, category_id):
         if form.is_valid():
             with transaction.atomic():
                 saved = form.save()
-                if saved.name != old_name:
-                    # Workstation lookup fields point at a category by name
-                    WorkstationField.objects.filter(lookup_category__iexact=old_name) \
-                        .update(lookup_category=saved.name)
                 _log_config_change(request.user, "update", "AssetCategory", saved.pk, saved.name,
                                    {"name": [old_name, saved.name]} if saved.name != old_name else None)
             messages.success(request, "Category updated.")
@@ -1621,7 +1614,7 @@ def category_delete(request, category_id):
     else:
         asset_count = category.assets.count()
         active_count = category.assets.filter(is_active=True).count()
-        if WorkstationField.objects.filter(lookup_category__iexact=name).exists():
+        if WorkstationField.objects.filter(lookup_category_id=category.pk).exists():
             problem = "A Workstation field links to this category. Change that field first."
     if request.method == "POST":
         if problem:
@@ -2017,46 +2010,23 @@ def export_assets(request):
         template = None if is_category_db_configured(category) else get_template_for_category(category.name)
 
         # Category Builder categories export EXACTLY what the builder defines,
-        # in builder order (same rule as the list / View pages): a Tag column
-        # always (import needs it), Name / Status only when the builder has
-        # that field, no generic Brand / Model / Serial / Notes columns added.
-        # Hand-built categories (Employee, Hard Disk, Cupboard, Air
-        # Conditioner) keep their existing export until they are converted.
-        _builder_export = (
-            get_builder_layout(category)
-            if not (
-                category.name.strip().lower() in ("air conditioner", "inside cupboard", "inside the cupboard", "hard disk")
-                or is_employee_category(category.name)
-            )
-            else None
-        )
+        # in builder order, through the same column / value rules as the List
+        # page (display.build_export_columns / build_export_cells): a Tag
+        # column always (import needs it), Name / Status only when the builder
+        # has that field, no generic Brand / Model / Serial / Notes columns
+        # added. This includes Employee, Hard Disk, Cupboard and Air
+        # Conditioner once they are configured in the builder, exactly like
+        # their List pages. Only categories with no builder fields yet keep
+        # the legacy export below.
+        export_columns = build_export_columns(category)
 
         is_info_reg = category.name.strip().lower() in INFO_REGISTER_CATEGORIES
 
-
-
         cat_key = category.name.strip().lower()
 
-        if _builder_export is not None:
-            b_fields = [f for f in get_category_fields(category)]
-            b_cols = [builder_field_column(f) for f in b_fields]
-            headers, data_rows = [], []
-            if "asset_tag" not in b_cols:
-                headers.append(_builder_export["labels"].get("tag_label", "Asset Tag"))
-            headers += [f["label"] for f in b_fields]
-            for asset in assets:
-                row = [] if "asset_tag" in b_cols else [asset.display_tag]
-                for f, col in zip(b_fields, b_cols):
-                    if col == "asset_tag":
-                        row.append(asset.display_tag)
-                    elif col == "name":
-                        row.append(asset.display_name)
-                    elif col == "status":
-                        row.append(asset.get_status_display())
-                    else:
-                        v = resolve_field_value(asset, f)
-                        row.append("" if v is None else v)
-                data_rows.append(row)
+        if export_columns is not None:
+            headers = [c["label"] for c in export_columns]
+            data_rows = [build_export_cells(asset, export_columns) for asset in assets]
         elif not template and cat_key in TEMPLATE_EXPORT_COLUMNS and not is_category_db_configured(category):
             # Match the Import Template sheet exactly (all its columns are
             # always written, even when empty, like the templated sheets).
@@ -2867,21 +2837,6 @@ def category_builder(request, category_id):
 
 
 
-def _warn_unmatched_status_options(request, category, field):
-    """Tell the admin which Status dropdown options the Status column can't store."""
-    if field.field_type not in ("select", "searchable_select"):
-        return
-    if builder_field_column({"name": field.key, "label": field.label}) != "status":
-        return
-    _choices, unmatched = builder_status_choices(category)
-    if unmatched:
-        messages.warning(
-            request,
-            "Status can only use the built-in statuses (Working, Not Working, Idle, Scrap, "
-            "Missing, Under Service, Active, Inactive, Open, Resolved, Running, Stopped, "
-            "Completed, Not Set, Other). These options will not be offered: "
-            + ", ".join(unmatched) + ".",
-        )
 
 
 @login_required
@@ -2929,8 +2884,9 @@ def builder_field_add(request, category_id):
     show_add    = request.POST.get("show_in_add", "true") != "false"
 
     show_edit   = request.POST.get("show_in_edit", "true") != "false"
-
     options_raw = request.POST.get("options", "")
+    ml_raw = request.POST.get("max_length", "").strip()
+    max_length = int(ml_raw) if ml_raw.isdigit() else None
 
 
 
@@ -2985,10 +2941,9 @@ def builder_field_add(request, category_id):
         show_in_add=show_add,
 
         show_in_edit=show_edit,
-
         display_order=max_order + 10,
-
         is_active=True,
+        max_length=max_length,
 
     )
 
@@ -3022,7 +2977,7 @@ def builder_field_add(request, category_id):
 
 
 
-    _warn_unmatched_status_options(request, category, field)
+
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
 
         return JsonResponse({
@@ -3118,7 +3073,8 @@ def builder_field_edit(request, category_id, field_id):
     field.show_in_add   = request.POST.get("show_in_add", "true") != "false"
 
     field.show_in_edit  = request.POST.get("show_in_edit", "true") != "false"
-
+    ml_raw = request.POST.get("max_length", "").strip()
+    field.max_length    = int(ml_raw) if ml_raw.isdigit() else None
     field.save()
 
 
@@ -3195,7 +3151,7 @@ def builder_field_edit(request, category_id, field_id):
 
 
 
-    _warn_unmatched_status_options(request, category, field)
+
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
 
         return JsonResponse({"ok": True, "label": field.label, "field_id": field.pk})
@@ -3411,9 +3367,10 @@ def workstation_field_add(request):
         required=request.POST.get("required") == "true",
         placeholder=request.POST.get("placeholder", ""),
         help_text=request.POST.get("help_text", ""),
-        lookup_category=lookup_category if field_type == "lookup" else "",
+        lookup_category_id=lookup_category if field_type == "lookup" else None,
         lookup_multi=(request.POST.get("lookup_multi") == "true") if field_type == "lookup" else False,
         display_order=max_order + 10,
+        max_length=int(request.POST.get("max_length").strip()) if request.POST.get("max_length", "").strip().isdigit() else None,
     )
 
     if field_type in ("select", "searchable_select"):
@@ -3456,11 +3413,14 @@ def workstation_field_edit(request, field_id):
         if not lookup_category:
             messages.error(request, "Pick which asset category a Lookup field searches.")
             return redirect("assets:workstation_builder")
-        field.lookup_category = lookup_category
+        field.lookup_category_id = lookup_category
         field.lookup_multi = request.POST.get("lookup_multi") == "true"
     else:
-        field.lookup_category = ""
+        field.lookup_category_id = None
         field.lookup_multi = False
+
+    ml_raw = request.POST.get("max_length", "").strip()
+    field.max_length = int(ml_raw) if ml_raw.isdigit() else None
     field.save()
 
     if field.field_type in ("select", "searchable_select"):

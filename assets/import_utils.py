@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from .models import Asset, AssetCategory
+from .naming import NAME_IS_TAG_CATEGORIES, generate_asset_name
 from .category_fields import _is_sensitive_field, is_category_db_configured, get_category_fields
 from .sheet_templates import get_sheet_template, diff_headers as _diff_template_headers
 
@@ -585,7 +586,12 @@ def _parse_inside_cupboard_sheet_rows(rows, existing_tags=None, seen_tags=None):
     items = []
 
     # 1. Block 1: Internal Hard Disks (cols 0-3, top rows)
-    for r in rows[1:14]:
+    split_idx = 14
+    for i, r in enumerate(rows):
+        if len(r) > 0 and 'graphics card' in str(r[0]).lower():
+            split_idx = i
+            break
+    for r in rows[1:split_idx]:
         brand = _cell_text(r[0] if len(r) > 0 else '')
         size = _cell_text(r[1] if len(r) > 1 else '')
         sno = _cell_text(r[2] if len(r) > 2 else '')
@@ -606,7 +612,7 @@ def _parse_inside_cupboard_sheet_rows(rows, existing_tags=None, seen_tags=None):
         })
 
     # 2. Block 2: Internal HDDs (cols 6-9, top section up to row 15)
-    for r in rows[1:]:
+    for r in rows[1:split_idx]:
         if len(r) <= 6:
             continue
         brand = _cell_text(r[6] if len(r) > 6 else '')
@@ -635,7 +641,7 @@ def _parse_inside_cupboard_sheet_rows(rows, existing_tags=None, seen_tags=None):
 
     # 3. Sub-table: Cards (col 0), RAM (cols 2-4), Accessories (col 6) in bottom section
     card_type = 'Graphics Card'
-    for r in rows[14:]:
+    for r in rows[split_idx:]:
         col0 = _cell_text(r[0] if len(r) > 0 else '')
         if col0:
             if 'vga' in col0.lower():
@@ -1546,9 +1552,13 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                 # Software and OS) — build a reasonable default from the
                 # category + tag instead of rejecting every row (e.g.
                 # "Workstation SPS019").
-                name = f"{category_display_name} {tag_shared_base or tag}".strip() if tag else category_display_name
-                if category_display_name == "Project Details" and tag:
-                    name = tag  # the project name is the tag
+                # One shared rule (naming.py): Brand + Model when the row has
+                # a Brand, else "<Category> <tag>"; Project Details = the tag.
+                name_tag = tag if category_display_name.strip().lower() in NAME_IS_TAG_CATEGORIES else (tag_shared_base or tag)
+                name = generate_asset_name(
+                    category_display_name, name_tag,
+                    _cell_text(row_map.get("brand")), _cell_text(row_map.get("model_number")),
+                )
                 raw_display["Name"] = name
                 fields["name"] = name
             else:
@@ -1724,6 +1734,31 @@ def _validate_sheet_rows(header_row, data_rows, col_to_field, categories_by_name
                     if value != "":
                         extra_details[header_text] = value
             
+            # Other Asset: rows coming from the Inside Cupboard sheet carry
+            # Asset Tag / Name / Item Type, but the Other Asset builder shows
+            # ID / Device Name / Device Type — so those three columns stayed
+            # empty. ID = Asset Tag, Device Name = Name, Device Type = Item
+            # Type. Only fills a blank value, never overwrites real data
+            # (e.g. rows from the old Others sheet that already have them).
+            if (category_display_name or "").strip().lower() == "other asset":
+                _item_type_f = label_to_field.get("item type")
+                _alias_values = {
+                    "id": fields.get("asset_tag") or "",
+                    "device name": fields.get("name") or "",
+                    "device type": (
+                        extra_details.get(_item_type_f.key, "") if _item_type_f else ""
+                    ),
+                }
+                for _lbl, _val in _alias_values.items():
+                    _af = label_to_field.get(_lbl)
+                    if _af is None or not str(_val).strip():
+                        continue
+                    if str(extra_details.get(_af.key, "")).strip():
+                        continue
+                    if _af.field_type in ("select", "searchable_select", "number", "date"):
+                        continue   # free-text fields only
+                    extra_details[_af.key] = str(_val).strip()
+
             from .category_fields import builder_field_column
             # Headers this sheet routed into a core column (e.g. "Employee Id" ->
             # asset_tag, "EmployeeName" -> name). Their values never reach
@@ -2165,7 +2200,7 @@ def validate_workstation_rows(header_row, data_rows, workstation_fields,
                         # migrated workstations link the same way. Tokens
                         # that match nothing go to `unresolved`, not lost.
                         is_multi = getattr(f, "lookup_multi", False)
-                        target_cat = getattr(f, "lookup_category", "") or None
+                        target_cat = f.lookup_category.name if getattr(f, "lookup_category", None) else None
                         if resolve_lookups:
                             stored, unmatched = resolve_lookup_value(value, is_multi, target_cat)
                             extra_details[f.key] = stored

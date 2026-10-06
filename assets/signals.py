@@ -1,7 +1,7 @@
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 
-from .models import Asset, AssetHistory, TRACKED_FIELDS
+from .models import Asset, AssetHistory, TRACKED_FIELDS, Workstation, WorkstationField
 
 
 @receiver(pre_save, sender=Asset)
@@ -49,4 +49,48 @@ def write_history(sender, instance, created, **kwargs):
                 old_value=str(old_val) if old_val is not None else "",
                 new_value=str(new_val) if new_val is not None else "",
                 changed_by=instance.updated_by,
+            )
+@receiver(pre_save, sender=Workstation)
+def capture_workstation_old_values(sender, instance, **kwargs):
+    if not instance.pk:
+        return
+    try:
+        old = Workstation.objects.get(pk=instance.pk)
+    except Workstation.DoesNotExist:
+        return
+    instance._history_old_extra = dict(old.extra_details)
+
+@receiver(post_save, sender=Workstation)
+def write_workstation_history(sender, instance, created, **kwargs):
+    if created:
+        return
+
+    old_extra = instance.__dict__.pop("_history_old_extra", None)
+    if old_extra is None:
+        return
+
+    all_keys = set(old_extra.keys()) | set(instance.extra_details.keys())
+    
+    # Pre-fetch field labels so we store 'Processor' instead of 'cpu_number'
+    field_map = {f.key: f.label for f in WorkstationField.objects.filter(key__in=all_keys)}
+
+    for key in all_keys:
+        old_val = old_extra.get(key)
+        new_val = instance.extra_details.get(key)
+        
+        if isinstance(old_val, list):
+            old_val = ", ".join(old_val)
+        if isinstance(new_val, list):
+            new_val = ", ".join(new_val)
+            
+        old_str = str(old_val) if old_val is not None else ""
+        new_str = str(new_val) if new_val is not None else ""
+        
+        if old_str != new_str:
+            AssetHistory.objects.create(
+                asset=instance.asset,
+                field_name=field_map.get(key, key),
+                old_value=old_str,
+                new_value=new_str,
+                changed_by=instance.asset.updated_by,
             )

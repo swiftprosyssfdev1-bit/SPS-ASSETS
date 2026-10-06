@@ -119,7 +119,15 @@ def get_forward_relationships(asset: Asset) -> List[Dict[str, Any]]:
         return []
     
     cat_key = asset.category.name.strip().lower()
-    configs = FORWARD_RELATION_CONFIG.get(cat_key, [])
+    configs = list(FORWARD_RELATION_CONFIG.get(cat_key, []))
+
+    if cat_key == "workstation":
+        from .models import WorkstationField
+        seen_keys = {c[0] for c in configs}
+        for f in WorkstationField.objects.filter(field_type="lookup", is_active=True).select_related('lookup_category'):
+            if f.lookup_category_id and f.lookup_category and f.key.lower() not in seen_keys:
+                configs.append((f.key.lower(), f.label, f.lookup_category.name, f.lookup_multi))
+
     if not configs:
         return []
     

@@ -81,12 +81,12 @@
 
                 {% elif field.type == "textarea" %}
                 <textarea name="{{ field.name }}" class="form-control" rows="3"
-                          placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>{{ field.value }}</textarea>
+                          placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %} {% if field.max_length %}maxlength="{{ field.max_length }}"{% endif %}>{{ field.value }}</textarea>
 
                 {% else %}
                 <input type="{% if field.type == 'date' %}date{% elif field.type == 'number' %}number{% elif field.type == 'email' %}email{% elif field.type == 'url' %}url{% else %}text{% endif %}"
                        name="{{ field.name }}" class="form-control" value="{{ field.value }}"
-                       placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>
+                       placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %} {% if field.max_length %}maxlength="{{ field.max_length }}"{% endif %}>
                 {% endif %}
 
                 {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}

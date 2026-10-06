@@ -55,11 +55,11 @@
 
             <div class="col-md-6" id="field-wrap-asset-tag">
 
-                <label class="form-label fw-semibold" id="label-asset-tag">{% if employee_form %}Employee ID{% else %}Asset Tag{% endif %}</label>
+                <label class="form-label fw-semibold" id="label-asset-tag">Asset Tag</label>
 
                 {{ form.asset_tag }}
 
-                <div class="form-text" id="help-asset-tag">{% if not employee_form %}Unique ID{% endif %}</div>
+                <div class="form-text" id="help-asset-tag">Unique ID</div>
 
                 {{ form.asset_tag.errors }}
 
@@ -67,7 +67,7 @@
 
             <div class="col-md-6" id="field-wrap-name">
 
-                <label class="form-label fw-semibold" id="label-name">{% if employee_form %}Employee Name{% else %}Name{% endif %}</label>
+                <label class="form-label fw-semibold" id="label-name">Name</label>
 
                 {{ form.name }}
 
@@ -324,13 +324,14 @@ document.addEventListener('DOMContentLoaded', function () {
             return '<div class="' + colClass + '"><label class="form-label fw-semibold">' + field.label + '</label>' +
                    '<select name="' + field.name + '" class="form-select">' + opts + '</select></div>';
         }
+        let maxAttr = field.max_length ? (' maxlength="' + field.max_length + '"') : '';
         if (field.type === 'textarea') {
             return '<div class="' + colClass + '"><label class="form-label fw-semibold">' + field.label + '</label>' +
-                   '<textarea name="' + field.name + '" class="form-control" rows="3">' + esc + '</textarea></div>';
+                   '<textarea name="' + field.name + '" class="form-control" rows="3"' + maxAttr + '>' + esc + '</textarea></div>';
         }
         const inputType = field.type === 'date' ? 'date' : (field.type === 'number' ? 'number' : (field.type === 'email' ? 'email' : (field.type === 'url' ? 'url' : 'text')));
         return '<div class="' + colClass + '"><label class="form-label fw-semibold">' + field.label + '</label>' +
-               '<input type="' + inputType + '" name="' + field.name + '" class="form-control" value="' + esc + '"></div>';
+               '<input type="' + inputType + '" name="' + field.name + '" class="form-control"' + maxAttr + ' value="' + esc + '"></div>';
     }
 
     function setupStaticCombo(wrap) {

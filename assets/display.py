@@ -50,16 +50,7 @@ _CANONICAL_LABELS = {
     "notes": {"notes"},
 }
 
-# Old imports stored some values under raw sheet headers that the builder
-# fields were later re-keyed away from. These keep that existing data visible.
-# {(category name, field label), both normalised: [legacy extra_details keys]}
-# TEMPORARY: stage 4 (remove category hardcoding) should migrate/re-key this
-# data and delete this table.
-LEGACY_EXTRA_FALLBACKS = {
-    ("hard disk", "current status"): ["Details"],
-    ("air conditioner", "capacity location"): ["Status"],
-    ("air conditioner", "serviced"): ["Details"],
-}
+
 
 # A status wording that means "no real status" (old Employee import).
 _BLANK_STATUS_WORDS = {"not added"}
@@ -68,22 +59,31 @@ _BLANK_STATUS_WORDS = {"not added"}
 # ---------------------------------------------------------------------------
 # Value formatting
 # ---------------------------------------------------------------------------
-def format_value(value, field=None):
+def format_value(value, field=None, iso_dates=False):
     """Any stored value -> a safe display string ('' when empty).
 
     Handles None, 0 / False (which are real values, not 'missing'), dates,
     lists, dicts and select values stored with different case/spacing than
-    the option label."""
+    the option label.
+
+    iso_dates: write dates as YYYY-MM-DD (the Excel export uses this so an
+    exported file can be re-imported; the pages use the site's date format)."""
     if value is None:
         return ""
     if isinstance(value, bool):
         return "Yes" if value else "No"
     if isinstance(value, (datetime.datetime, datetime.date)):
+        if iso_dates:
+            if isinstance(value, datetime.datetime):
+                value = value.date()
+            return value.isoformat()
         return formats.date_format(value, "DATE_FORMAT")
     if isinstance(value, (list, tuple, set)):
-        return ", ".join(format_value(v) for v in value if format_value(v))
+        parts = (format_value(v, None, iso_dates) for v in value)
+        return ", ".join(p for p in parts if p)
     if isinstance(value, dict):
-        return ", ".join(f"{k}: {format_value(v)}" for k, v in value.items() if format_value(v))
+        parts = ((k, format_value(v, None, iso_dates)) for k, v in value.items())
+        return ", ".join(f"{k}: {v}" for k, v in parts if v)
     text = str(value).strip()
     if text and field and field.get("type") in ("select", "searchable_select"):
         wanted = _norm_label(text)
@@ -123,8 +123,19 @@ def _label_config_column(category, field):
     return None
 
 
+# Other Asset is the catch-all category (old "Others" and "Inside Cupboard"
+# sheets). There the ID column IS the Asset Tag and the Device Name column IS
+# the Name - the same rule the List page has always used - so those two
+# builder fields are bound to the real columns instead of being drawn next to
+# a second, duplicate Tag / Name.
+_OTHER_ASSET_LABEL_COLUMNS = {"id": "asset_tag", "device name": "name"}
+
+
 def _column_of(category, field):
-    return builder_field_column(field) or _label_config_column(category, field)
+    col = builder_field_column(field) or _label_config_column(category, field)
+    if col is None and (getattr(category, "name", "") or "").strip().lower() == "other asset":
+        col = _OTHER_ASSET_LABEL_COLUMNS.get(_norm_label(field.get("label")))
+    return col
 
 
 def _primary_bindings(category, fields):
@@ -174,8 +185,34 @@ def _raw_value(asset, field, col):
     if format_value(value):
         return value
     cat = (getattr(asset.category, "name", "") or "").strip().lower()
-    for key in LEGACY_EXTRA_FALLBACKS.get((cat, _norm_label(field.get("label"))), []):
-        legacy = (asset.extra_details or {}).get(key)
+    # Other Asset: the list page already treats the Asset Tag as "ID" and the
+    # Name as "Device Name" (and Inside Cupboard rows keep their type under
+    # "Item Type"), so the Detail page reads the same real columns when the
+    # builder fields have no stored value of their own.
+    if cat == "other asset":
+        lbl = _norm_label(field.get("label"))
+        if lbl == "id" and asset.display_tag:
+            return asset.display_tag
+        if lbl == "device name" and asset.display_name:
+            return asset.display_name
+        if lbl == "device type":
+            for k, v in (asset.extra_details or {}).items():
+                if _norm_label(k) == "item type" and format_value(v):
+                    return v
+    # Legacy key fallbacks: rows imported before these categories had builder
+    # fields may have values under old column names. The current builder field
+    # key (e.g. 'current_status') won't match, so try the historic key too.
+    _LEGACY_KEY_FALLBACKS = {
+        # Hard Disk: the old import stored the current status in 'Details'
+        ("hard disk", "current status"): ["Details"],
+        # Air Conditioner: old Others-sheet import used 'Status' for capacity
+        # and 'Details' for last serviced date
+        ("air conditioner", "capacity location"): ["Status"],
+        ("air conditioner", "serviced"): ["Details"],
+    }
+    lbl_norm = _norm_label(field.get("label") or "")
+    for fallback_key in _LEGACY_KEY_FALLBACKS.get((cat, lbl_norm), []):
+        legacy = (asset.extra_details or {}).get(fallback_key)
         if format_value(legacy):
             return legacy
     if col is None:
@@ -208,7 +245,11 @@ def status_cell(asset, field=None, choices=None):
     label = asset.get_status_display()
     cat = (getattr(asset.category, "name", "") or "").strip().lower()
     if cat == "air conditioner" and code == "other":
-        code, label = "working", "Working"      # legacy AC import rule
+        # Legacy AC import: rows imported from the old Others sheet before AC
+        # got its own Status column land with status='other'. Display 'Working'
+        # so the badge isn't misleading. Once the row is edited through the
+        # Category Builder form it will get a real status code instead.
+        code, label = "working", "Working"
     if choices and code in choices:
         label = choices[code]
     if field is not None:
@@ -223,23 +264,31 @@ def status_cell(asset, field=None, choices=None):
     return {"code": badge, "label": label}
 
 
-def _field_text(asset, field, col, dup_col, status_choices):
+
+def _field_text(asset, field, col, dup_col, status_choices, iso_dates=False):
     """Display text of an ordinary builder field."""
-    text = format_value(_raw_value(asset, field, col), field)
+    text = format_value(_raw_value(asset, field, col), field, iso_dates)
     if not text and dup_col:
         if dup_col == "status":
             text = status_cell(asset, None, status_choices)["label"]
         elif dup_col != "asset_tag":
-            text = format_value(getattr(asset, dup_col, ""), field)
+            text = format_value(getattr(asset, dup_col, ""), field, iso_dates)
     return text
 
 
 # ---------------------------------------------------------------------------
 # List page
 # ---------------------------------------------------------------------------
-def build_list_columns(category, default_tag_label="Tag"):
-    """Ordered column descriptors for the List page, or None when the
-    category isn't builder-configured (legacy rendering applies)."""
+def _is_password_field(f):
+    """True for a field whose label/key is a password (List page hides these)."""
+    text = f"{f.get('label') or ''} {f.get('name') or ''}".lower()
+    return "password" in text or "passwd" in text
+
+
+def _builder_columns(category, default_tag_label, list_only):
+    """Column descriptors straight from the category's active builder fields,
+    in builder order. list_only drops fields whose List visibility is off
+    (the List page); the Excel export keeps every active field."""
     built = _builder_fields(category)
     if built is None:
         return None
@@ -252,7 +301,8 @@ def build_list_columns(category, default_tag_label="Tag"):
         kind = {"asset_tag": "tag", "name": "name", "status": "status"}.get(col, "field")
         if kind == "tag":
             tag_bound = True
-        if not visible:
+        if list_only and (not visible or _is_password_field(f)):
+            # passwords never appear on the List page (they stay in the detail view)
             continue
         columns.append({
             "kind": kind, "label": f.get("label") or f.get("name"), "field": f,
@@ -266,6 +316,12 @@ def build_list_columns(category, default_tag_label="Tag"):
                            "column": "asset_tag", "dup_column": None, "type": "text",
                            "key": "__tag__", "status_choices": {}})
     return columns
+
+
+def build_list_columns(category, default_tag_label="Tag"):
+    """Ordered column descriptors for the List page, or None when the
+    category isn't builder-configured (legacy rendering applies)."""
+    return _builder_columns(category, default_tag_label, list_only=True)
 
 
 def build_list_cells(asset, columns, link_key=None, resolver=None):
@@ -290,6 +346,42 @@ def build_list_cells(asset, columns, link_key=None, resolver=None):
             if link_key and c["key"] == link_key and text and resolver:
                 cell["link"] = resolver(text)
             cells.append(cell)
+    return cells
+
+
+# ---------------------------------------------------------------------------
+# Excel export
+# ---------------------------------------------------------------------------
+def build_export_columns(category, default_tag_label="Asset Tag"):
+    """Ordered column descriptors for the Excel export, or None when the
+    category isn't builder-configured (the legacy export applies).
+
+    Same fields, order, labels and value rules as the List page, so a sheet
+    always agrees with what the user sees on screen. One difference: the
+    List page's "show in list" switch only trims the on-screen table, so the
+    export keeps every active field (nothing is lost when the file is
+    edited and imported back). The Tag column is always present, because
+    import needs it to identify the record."""
+    return _builder_columns(category, default_tag_label, list_only=False)
+
+
+def build_export_cells(asset, columns):
+    """One plain value per export column for `asset`: no shortening, dates as
+    YYYY-MM-DD, the same Status wording the List page shows."""
+    cells = []
+    for c in columns:
+        kind = c["kind"]
+        if kind == "tag":
+            cells.append(asset.display_tag or "")
+        elif kind == "name":
+            cells.append(asset.display_name or "")
+        elif kind == "status":
+            cells.append(status_cell(asset, c["field"], c["status_choices"])["label"])
+        else:
+            cells.append(_field_text(
+                asset, c["field"], c["column"], c["dup_column"],
+                c["status_choices"], iso_dates=True,
+            ))
     return cells
 
 

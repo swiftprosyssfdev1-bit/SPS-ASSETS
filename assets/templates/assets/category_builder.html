@@ -227,7 +227,7 @@
                     </div>
                     <div class="f-actions">
                         <button class="icon-btn" title="Edit"
-                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, this.dataset.options || '')" data-options="{% for opt in f.options.all %}{% if opt.is_active %}{{ opt.label }}&#10;{% endif %}{% endfor %}">
+                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, '{{ f.max_length|default_if_none:"" }}', this.dataset.options || '')" data-options="{% for opt in f.options.all %}{% if opt.is_active %}{{ opt.label }}&#10;{% endif %}{% endfor %}">
                             <i class="bi bi-pencil"></i>
                         </button>
                         {% if f.is_active %}
@@ -349,6 +349,10 @@
                             </select>
                         </div>
                         <div class="col-md-4">
+                            <label class="form-label fw-semibold">Max Length</label>
+                            <input type="number" name="max_length" class="form-control" placeholder="Optional">
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold">Placeholder</label>
                             <input type="text" name="placeholder" class="form-control" placeholder="Optional hint text">
                         </div>
@@ -424,6 +428,10 @@
                             </select>
                         </div>
                         <div class="col-md-4">
+                            <label class="form-label fw-semibold">Max Length</label>
+                            <input type="number" name="max_length" id="edit-max-length" class="form-control" placeholder="Optional">
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold">Placeholder</label>
                             <input type="text" name="placeholder" id="edit-placeholder" class="form-control">
                         </div>
@@ -460,7 +468,7 @@ function showAddModal() {
     new bootstrap.Modal(document.getElementById('addFieldModal')).show();
 }
 
-function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, optionsText) {
+function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, maxLength, optionsText) {
     document.getElementById('edit-label').value = label;
     var ftSel = document.getElementById('edit-field-type');
     ftSel.value = ftype;
@@ -468,6 +476,7 @@ function showEditModal(fid, label, ftype, width, required, placeholder, helpText
     document.getElementById('edit-options').value = (optionsText || '').trim();
     document.getElementById('edit-width').value = String(width);
     document.getElementById('edit-required').value = required ? 'true' : 'false';
+    document.getElementById('edit-max-length').value = maxLength || '';
     document.getElementById('edit-placeholder').value = placeholder;
     document.getElementById('edit-help-text').value = helpText;
     document.getElementById('sil_edit').checked = sil;

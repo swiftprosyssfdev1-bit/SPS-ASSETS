@@ -86,7 +86,7 @@
         {% for f in detail_fields %}
         <div class="{% if f.width == 12 %}col-12{% else %}col-md-6{% endif %}">
             <div class="text-muted small">{{ f.label }}</div>
-            <div class="fw-semibold"{% if f.type == "textarea" %} style="white-space: pre-line;"{% endif %}>{{ f.value|default:"—" }}</div>
+            <div class="fw-semibold"{% if f.type == "textarea" %} style="white-space: pre-line;"{% endif %}>{% if f.kind == "status" and f.value %}<span class="badge badge-status-{{ f.badge }}">{{ f.value }}</span>{% else %}{{ f.value|default:"—" }}{% endif %}</div>
         </div>
         {% endfor %}
     </div>
