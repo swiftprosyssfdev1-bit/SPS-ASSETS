@@ -323,6 +323,12 @@ class AssetField(models.Model):
     display_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     max_length = models.PositiveIntegerField(null=True, blank=True)
+    # Searchable Dropdown only: when set, the dropdown lists EXISTING assets of
+    # this category (e.g. Employee IDs, Mouse, CPU) instead of a typed option list.
+    lookup_category = models.ForeignKey(
+        "AssetCategory", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        help_text="Searchable Dropdown only: pull the options from existing assets of this category.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -352,7 +358,11 @@ class AssetField(models.Model):
             "show_in_add": self.show_in_add,
             "show_in_edit": self.show_in_edit,
         }
-        if self.field_type in ("select", "searchable_select"):
+        use_assets = self.field_type == "searchable_select" and self.lookup_category_id
+        if use_assets:
+            # Name (not id): the Add/Edit Asset form + asset_lookup() accept either.
+            d["lookup_category"] = self.lookup_category.name
+        elif self.field_type in ("select", "searchable_select"):
             d["options"] = list(
                 self.options.filter(is_active=True)
                     .order_by("display_order")

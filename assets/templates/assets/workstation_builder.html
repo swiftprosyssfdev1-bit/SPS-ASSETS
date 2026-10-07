@@ -329,22 +329,28 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label fw-semibold">Input Type</label>
-                            <select name="field_type" class="form-select" id="add-field-type" onchange="toggleFieldType(this,'add')">
+                            <select name="field_type" class="form-select" id="add-field-type" onchange="onFieldTypeChange(this,'add')">
                                 <option value="text">Single Line Text</option>
                                 <option value="textarea">Multi-Line Text</option>
-                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown</option>
+                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown (Lookup)</option>
                                 <option value="number">Number</option>
                                 <option value="date">Date</option>
                                 <option value="email">Email</option>
                                 <option value="url">URL</option>
-                                <option value="lookup">Lookup (link to another asset)</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="add-source-group" style="display:none;">
+                            <label class="form-label fw-semibold">Options Source</label>
+                            <select name="options_source" id="add-options-source" class="form-select" onchange="toggleFieldType(document.getElementById('add-field-type'),'add')">
+                                <option value="manual">Manual (type options)</option>
+                                <option value="assets">Lookup (existing records)</option>
                             </select>
                         </div>
                         <div class="col-12" id="add-lookup-group" style="display:none;">
                             <div class="lookup-box">
                                 <div class="row g-3">
                                     <div class="col-md-8">
-                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Links to category</label>
+                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Lookup Source <span class="text-danger">*</span></label>
                                         <select name="lookup_category" class="form-select">
                                             <option value="">— choose —</option>
                                             {% for c in category_choices %}
@@ -430,22 +436,28 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label fw-semibold">Input Type</label>
-                            <select name="field_type" id="edit-field-type" class="form-select" onchange="toggleFieldType(this,'edit')">
+                            <select name="field_type" id="edit-field-type" class="form-select" onchange="onFieldTypeChange(this,'edit')">
                                 <option value="text">Single Line Text</option>
                                 <option value="textarea">Multi-Line Text</option>
-                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown</option>
+                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown (Lookup)</option>
                                 <option value="number">Number</option>
                                 <option value="date">Date</option>
                                 <option value="email">Email</option>
                                 <option value="url">URL</option>
-                                <option value="lookup">Lookup (link to another asset)</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="edit-source-group" style="display:none;">
+                            <label class="form-label fw-semibold">Options Source</label>
+                            <select name="options_source" id="edit-options-source" class="form-select" onchange="toggleFieldType(document.getElementById('edit-field-type'),'edit')">
+                                <option value="manual">Manual (type options)</option>
+                                <option value="assets">Lookup (existing records)</option>
                             </select>
                         </div>
                         <div class="col-12" id="edit-lookup-group" style="display:none;">
                             <div class="lookup-box">
                                 <div class="row g-3">
                                     <div class="col-md-8">
-                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Links to category</label>
+                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Lookup Source <span class="text-danger">*</span></label>
                                         <select name="lookup_category" id="edit-lookup-category" class="form-select">
                                             <option value="">— choose —</option>
                                             {% for c in category_choices %}
@@ -521,15 +533,30 @@ function showAddModal() {
     new bootstrap.Modal(document.getElementById('addFieldModal')).show();
 }
 
+// Picking Searchable Dropdown defaults to Lookup (existing records), like the category builder.
+function onFieldTypeChange(sel, prefix) {
+    if (sel.value === 'searchable_select') {
+        document.getElementById(prefix + '-options-source').value = 'assets';
+    }
+    toggleFieldType(sel, prefix);
+}
+
 function toggleFieldType(sel, prefix) {
-    document.getElementById(prefix + '-options-group').style.display = (sel.value === 'select' || sel.value === 'searchable_select') ? '' : 'none';
-    document.getElementById(prefix + '-lookup-group').style.display = sel.value === 'lookup' ? '' : 'none';
+    var isSearchable = sel.value === 'searchable_select';
+    var useLookup = isSearchable && document.getElementById(prefix + '-options-source').value === 'assets';
+    document.getElementById(prefix + '-source-group').style.display = isSearchable ? '' : 'none';
+    document.getElementById(prefix + '-lookup-group').style.display = useLookup ? '' : 'none';
+    // typed options: plain Dropdown, or Searchable Dropdown in Manual mode
+    document.getElementById(prefix + '-options-group').style.display = (sel.value === 'select' || (isSearchable && !useLookup)) ? '' : 'none';
+    var cat = document.querySelector('#' + prefix + '-lookup-group select[name="lookup_category"]');
+    if (cat) cat.required = useLookup;
 }
 
 function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, maxLength, lookupCategory, lookupMulti, optionsText) {
     document.getElementById('edit-label').value = label;
     var ftSel = document.getElementById('edit-field-type');
-    ftSel.value = ftype;
+    ftSel.value = (ftype === 'lookup') ? 'searchable_select' : ftype;   // Lookup is shown as Searchable Dropdown
+    document.getElementById('edit-options-source').value = (ftype === 'lookup') ? 'assets' : 'manual';
     toggleFieldType(ftSel, 'edit');
     document.getElementById('edit-width').value = String(width);
     document.getElementById('edit-required').value = required ? 'true' : 'false';

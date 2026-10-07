@@ -53,7 +53,7 @@
                 </div>
 
                 {% elif field.type == "lookup" %}
-                <div class="ws-combo-single position-relative" data-lookup-category="{{ field.lookup_category }}">
+                <div class="ws-combo-single position-relative" data-lookup-category="{{ field.lookup_category }}" data-field-label="{{ field.label }}">
                     <input type="text" class="form-control ws-combo-input" autocomplete="off"
                            placeholder="{{ field.placeholder|default:'Type to search…' }}" value="{{ field.value }}">
                     <input type="hidden" name="{{ field.name }}" class="ws-combo-value" value="{{ field.value }}">
@@ -85,7 +85,7 @@
 
                 {% else %}
                 <input type="{% if field.type == 'date' %}date{% elif field.type == 'number' %}number{% elif field.type == 'email' %}email{% elif field.type == 'url' %}url{% else %}text{% endif %}"
-                       name="{{ field.name }}" class="form-control" value="{{ field.value }}"
+                       name="{{ field.name }}" class="form-control" value="{{ field.value }}" data-field-label="{{ field.label }}"
                        placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %} {% if field.max_length %}maxlength="{{ field.max_length }}"{% endif %}>
                 {% endif %}
 
@@ -239,11 +239,20 @@ document.addEventListener('DOMContentLoaded', function () {
             input.value = item.dataset.tag;
             hidden.value = item.dataset.tag;
             // Auto-fill Employee Name field when an Employee lookup is selected
-            var catLower = (category || '').toLowerCase();
-            if (catLower === 'employee' || catLower === 'employee list') {
-                var nameInput = document.querySelector('input[name="Employee Name"], input[name="employee_name"], input[name="employee name"]');
+            // NOTE: `category` is the lookup category's numeric ID (not its name), so
+            // detect an Employee lookup by this field's own label, and find the
+            // Employee Name input by ITS label (input name is an auto-generated key).
+            var normLabel = function (t) { return (t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };
+            var myLabel = normLabel(wrap.dataset.fieldLabel);
+            var catLower = normLabel(category);
+            var isEmployeeLookup = /^employee( id| no| code| number)?$/.test(myLabel)
+                || catLower === 'employee' || catLower === 'employee list';
+            if (isEmployeeLookup) {
+                var nameInput = Array.from(document.querySelectorAll('#workstation-form input[data-field-label]'))
+                    .find(function (el) { return normLabel(el.dataset.fieldLabel) === 'employee name'; });
                 if (nameInput) {
                     nameInput.value = item.dataset.name || '';
+                    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
             dropdown.style.display = 'none';

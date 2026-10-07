@@ -36,6 +36,7 @@ from .category_fields import (
     workstation_lookup_category, status_driver_column, get_builder_layout, builder_field_column,
     builder_status_choices,
     get_list_display_fields, is_category_db_configured, get_workstation_fields,
+    reserved_field_label_problem,
 )
 from .naming import generate_asset_name
 from .sheet_templates import get_template_for_category
@@ -1222,7 +1223,7 @@ def _build_category_form_config():
                          "show_in_add": f.get("show_in_add", True), "show_in_edit": f.get("show_in_edit", True)}
                 if f.get("options"):
                     entry["options"] = f["options"]
-                lookup = workstation_lookup_category(f["label"])
+                lookup = f.get("lookup_category") or workstation_lookup_category(f["label"])
                 if lookup:
                     entry["lookup_category"] = lookup
                 extra_fields.append(entry)
@@ -1386,6 +1387,10 @@ def _resolve_back_link(request, default_url, default_label):
         return back, "Back to Search"
     elif name == "workstation_list":
         return back, "Back to " + workstation_labels()[0]
+    elif name == "workstation_asset_view":
+        prev = Asset.objects.filter(pk=match.kwargs.get("asset_id")).first()
+        if prev and can_access_branch(request.user, prev.branch):
+            return back, "Back to " + workstation_labels()[0]
     return default_url, default_label
 
 
@@ -1531,7 +1536,10 @@ def asset_lookup(request):
         }
         for a in qs
     ]
-    return JsonResponse({"results": results})
+    # Tell the form which single branch the list was limited to, so an empty
+    # result can say "in Chennai" instead of a bare "not found".
+    branch_name = branches.first().name if branches.count() == 1 else ""
+    return JsonResponse({"results": results, "branch": branch_name})
 
 
 def builtin_category_names():
@@ -1616,6 +1624,19 @@ def category_delete(request, category_id):
         active_count = category.assets.filter(is_active=True).count()
         if WorkstationField.objects.filter(lookup_category_id=category.pk).exists():
             problem = "A Workstation field links to this category. Change that field first."
+        else:
+            # Category Builder fields that pull their dropdown options from this
+            # category. Deleting it would silently leave them with an empty list.
+            _linked = list(
+                AssetField.objects.filter(lookup_category_id=category.pk, is_active=True)
+                .select_related("category").order_by("category__name", "label")[:5]
+            )
+            if _linked:
+                _names = ", ".join(f'"{f.label}" ({f.category.name})' for f in _linked)
+                problem = (
+                    f"These fields use this category as their Lookup Source: {_names}. "
+                    "Change or remove those fields first."
+                )
     if request.method == "POST":
         if problem:
             messages.error(request, problem)
@@ -2829,7 +2850,8 @@ def category_builder(request, category_id):
 
         "category": category,
 
-        "fields": fields,
+        "fields": fields.select_related("lookup_category"),
+        "category_choices": AssetCategory.objects.order_by("name"),
 
         "is_super_admin": True,
 
@@ -2887,6 +2909,15 @@ def builder_field_add(request, category_id):
     options_raw = request.POST.get("options", "")
     ml_raw = request.POST.get("max_length", "").strip()
     max_length = int(ml_raw) if ml_raw.isdigit() else None
+    lookup_cat_id = None
+    if field_type == "searchable_select" and request.POST.get("options_source") == "assets":
+        # Lookup mode: options come from existing records of the chosen category.
+        # (Manual mode: typed options, handled below like a normal Dropdown.)
+        cid = (request.POST.get("lookup_category") or "").strip()
+        if not (cid.isdigit() and AssetCategory.objects.filter(pk=int(cid)).exists()):
+            messages.error(request, "Pick a Lookup Source for the Searchable Dropdown.")
+            return redirect("assets:category_builder", category_id=category_id)
+        lookup_cat_id = int(cid)
 
 
 
@@ -2905,6 +2936,13 @@ def builder_field_add(request, category_id):
     existing_keys = set(AssetField.objects.filter(category=category).values_list("key", flat=True))
 
     key = _auto_key(label, existing_keys)
+
+    _reserved = reserved_field_label_problem(category.name, label, key)
+    if _reserved:
+        if request.headers.get("x-requested-with") == "XMLHttpRequest":
+            return JsonResponse({"ok": False, "error": _reserved}, status=400)
+        messages.error(request, _reserved)
+        return redirect("assets:category_builder", category_id=category_id)
 
 
 
@@ -2944,6 +2982,7 @@ def builder_field_add(request, category_id):
         display_order=max_order + 10,
         is_active=True,
         max_length=max_length,
+        lookup_category_id=lookup_cat_id,
 
     )
 
@@ -3054,7 +3093,15 @@ def builder_field_edit(request, category_id, field_id):
 
 
 
-    field.label         = request.POST.get("label", field.label).strip() or field.label
+    _new_label = request.POST.get("label", field.label).strip() or field.label
+    if _new_label != field.label:
+        _reserved = reserved_field_label_problem(category.name, _new_label, _auto_key(_new_label, set()))
+        if _reserved:
+            if request.headers.get("x-requested-with") == "XMLHttpRequest":
+                return JsonResponse({"ok": False, "error": _reserved}, status=400)
+            messages.error(request, _reserved)
+            return redirect("assets:category_builder", category_id=category_id)
+    field.label         = _new_label
 
     field.field_type    = request.POST.get("field_type", field.field_type)
 
@@ -3075,6 +3122,16 @@ def builder_field_edit(request, category_id, field_id):
     field.show_in_edit  = request.POST.get("show_in_edit", "true") != "false"
     ml_raw = request.POST.get("max_length", "").strip()
     field.max_length    = int(ml_raw) if ml_raw.isdigit() else None
+    use_assets = False
+    if field.field_type == "searchable_select" and request.POST.get("options_source") == "assets":
+        cid = (request.POST.get("lookup_category") or "").strip()
+        if not (cid.isdigit() and AssetCategory.objects.filter(pk=int(cid)).exists()):
+            messages.error(request, "Pick a Lookup Source for the Searchable Dropdown.")
+            return redirect("assets:category_builder", category_id=category_id)
+        field.lookup_category_id = int(cid)
+        use_assets = True
+    else:
+        field.lookup_category_id = None
     field.save()
 
 
@@ -3113,7 +3170,7 @@ def builder_field_edit(request, category_id, field_id):
 
 
 
-    if field.field_type in ("select", "searchable_select"):
+    if field.field_type in ("select", "searchable_select") and not use_assets:
 
         options_raw = request.POST.get("options", "")
 
@@ -3350,9 +3407,11 @@ def workstation_field_add(request):
         return redirect("assets:workstation_builder")
 
     field_type = request.POST.get("field_type", "text")
+    if field_type == "searchable_select" and request.POST.get("options_source") == "assets":
+        field_type = "lookup"   # Searchable Dropdown + Lookup Source -> stored as a Lookup field
     lookup_category = (request.POST.get("lookup_category") or "").strip()
     if field_type == "lookup" and not lookup_category:
-        messages.error(request, "Pick which asset category a Lookup field searches.")
+        messages.error(request, "Pick a Lookup Source for the Searchable Dropdown.")
         return redirect("assets:workstation_builder")
 
     existing_keys = set(WorkstationField.objects.values_list("key", flat=True))
@@ -3394,12 +3453,14 @@ def workstation_field_edit(request, field_id):
     old = {
         "label": field.label, "field_type": field.field_type, "width": field.width,
         "required": field.required, "placeholder": field.placeholder,
-        "help_text": field.help_text, "lookup_category": field.lookup_category,
+        "help_text": field.help_text, "lookup_category": field.lookup_category_id,
         "lookup_multi": field.lookup_multi,
     }
 
     field.label = (request.POST.get("label") or field.label).strip()
     field.field_type = request.POST.get("field_type", field.field_type)
+    if field.field_type == "searchable_select" and request.POST.get("options_source") == "assets":
+        field.field_type = "lookup"   # Searchable Dropdown + Lookup Source -> stored as a Lookup field
     field.width = int(request.POST.get("width", field.width))
     field.required = request.POST.get("required") == "true"
     field.placeholder = request.POST.get("placeholder", "")
@@ -3411,7 +3472,7 @@ def workstation_field_edit(request, field_id):
     if field.field_type == "lookup":
         lookup_category = (request.POST.get("lookup_category") or "").strip()
         if not lookup_category:
-            messages.error(request, "Pick which asset category a Lookup field searches.")
+            messages.error(request, "Pick a Lookup Source for the Searchable Dropdown.")
             return redirect("assets:workstation_builder")
         field.lookup_category_id = lookup_category
         field.lookup_multi = request.POST.get("lookup_multi") == "true"
@@ -3433,7 +3494,7 @@ def workstation_field_edit(request, field_id):
     new = {
         "label": field.label, "field_type": field.field_type, "width": field.width,
         "required": field.required, "placeholder": field.placeholder,
-        "help_text": field.help_text, "lookup_category": field.lookup_category,
+        "help_text": field.help_text, "lookup_category": field.lookup_category_id,
         "lookup_multi": field.lookup_multi,
     }
     diff = {k: [old[k], new[k]] for k in old if old[k] != new[k]}

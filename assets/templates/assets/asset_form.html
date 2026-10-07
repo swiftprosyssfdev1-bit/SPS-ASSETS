@@ -424,7 +424,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                     if (!results.length) {
 
-                        dropdown.innerHTML = '<div class="asset-combo-empty">No matching ' + category + ' found</div>';
+                        dropdown.innerHTML = '<div class="asset-combo-empty">No matching ' + category + ' found' + (data.branch ? ' in ' + data.branch : '') + '</div>';
 
                     } else {
 
@@ -459,6 +459,21 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         input.addEventListener('focus', function () { search(this.value); });
+
+        // Lookup lists are limited to the form's branch. If the branch is changed
+        // after a record was picked, that pick may belong to the OLD branch, so
+        // clear it and make the user pick again from the new branch.
+        if (branchSelect) {
+            branchSelect.addEventListener('change', function () {
+                if (!document.body.contains(wrap)) return;
+                if (hidden.value || input.value) {
+                    hidden.value = '';
+                    input.value = '';
+                    input.placeholder = 'Branch changed \u2013 pick again\u2026';
+                }
+                dropdown.style.display = 'none';
+            });
+        }
 
                 dropdown.addEventListener('click', function (e) {
             const item = e.target.closest('.asset-combo-item');
@@ -598,7 +613,20 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!ctl) return;
             const name = ctl.name, id = ctl.id, value = ctl.value;
             let html = '';
-            if (m.type === 'select' || m.type === 'searchable_select') {
+            if (m.lookup_category && m.type === 'searchable_select') {
+                // Live-search combo pulling from existing assets of the lookup category.
+                // Clear old freetext value — it is not a valid asset lookup result.
+                html = '<div class="asset-combo position-relative" data-lookup-category="' + escapeAttr(m.lookup_category) + '">' +
+                       '<input type="text" class="form-control asset-combo-input" autocomplete="off" placeholder="Type to search\u2026" value="">' +
+                       '<input type="hidden" name="' + name + '" id="' + id + '" class="asset-combo-value" value="">' +
+                       '<div class="asset-combo-dropdown"></div></div>';
+                wrap.innerHTML = (lbl ? lbl.outerHTML : '') + html;
+                wrap.querySelectorAll('.asset-combo').forEach(setupCombo);
+                return;
+            } else if (m.type === 'select' || m.type === 'searchable_select') {
+                // Static options dropdown.
+                // Only carry over the old value if the previous control was also a dropdown
+                // (not a textarea), to avoid showing stale freetext as a selected option.
                 let opts = '<option value="">\u2014</option>', found = false;
                 const vnorm = String(value || '').trim().toLowerCase();
                 (m.options || []).forEach(function (o) {
@@ -606,8 +634,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (sel) found = true;
                     opts += '<option value="' + escapeAttr(o) + '"' + (sel ? ' selected' : '') + '>' + escapeAttr(o) + '</option>';
                 });
-                // keep a saved legacy value that is not in the option list
-                if (value && !found) opts += '<option value="' + escapeAttr(value) + '" selected>' + escapeAttr(value) + '</option>';
+                if (value && !found && ctl.tagName === 'SELECT') {
+                    opts += '<option value="' + escapeAttr(value) + '" selected>' + escapeAttr(value) + '</option>';
+                }
                 html = '<select name="' + name + '" id="' + id + '" class="form-select">' + opts + '</select>';
             } else if (m.type === 'textarea') {
                 if (ctl.tagName === 'TEXTAREA') return;

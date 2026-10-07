@@ -602,6 +602,7 @@ def get_builder_layout(category):
             "width": 12 if f.get("width") == 12 else 6,
             "label": f.get("label") or "",
             "options": list(f.get("options") or []),
+            "lookup_category": f.get("lookup_category") or None,
         }
         if col in ("asset_tag", "name", "status"):
             list_skip.add(f["name"])   # drawn as the fixed Tag / Name / Status columns
@@ -696,3 +697,33 @@ def builder_core_options(category):
         if meta["type"] in ("select", "searchable_select") and meta["options"]:
             out[col] = {"label": meta["label"], "options": list(meta["options"])}
     return out
+
+
+# ---------------------------------------------------------------------------
+# Reserved Category-Builder labels
+# ---------------------------------------------------------------------------
+# In the Employee category "Employee Id" / "Employee Name" ARE the built-in
+# Asset Tag / Name columns, so _BUILDER_COLUMN_MAP binds them there on purpose.
+# In every OTHER category the same label would be bound to that category's own
+# Asset Tag / Name / Assigned-To column instead of being a separate field
+# (e.g. a Laptop "Employee Id" lookup would overwrite the laptop's own tag).
+_EMPLOYEE_ONLY_LABELS = {"employee id", "employeename", "employee name"}
+
+
+def reserved_field_label_problem(category_name, label, key=None):
+    """Error text when `label` can't be used for a builder field in
+    `category_name`, else None. `key` is the auto-generated field key (it is
+    bound the same way the label is, see builder_field_column())."""
+    import re
+    if is_employee_category(category_name):
+        return None
+    for cand in (key, label):
+        norm = re.sub(r"[^a-z0-9]+", " ", str(cand or "").lower()).strip()
+        if norm in _EMPLOYEE_ONLY_LABELS:
+            clean = str(label or "").strip()
+            return (
+                f'"{clean}" is reserved: outside the Employee category it would be '
+                f'bound to this category\'s own Asset Tag / Name column. '
+                f'Use "Assigned {clean}" instead.'
+            )
+    return None

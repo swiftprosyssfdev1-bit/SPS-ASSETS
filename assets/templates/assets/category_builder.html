@@ -101,6 +101,7 @@
     .type-icon.t-number { background: rgba(32,201,151,.14); color: #17a589; }
     .type-icon.t-date { background: rgba(247,148,29,.15); color: var(--swift-orange); }
     .type-icon.t-email, .type-icon.t-url { background: rgba(41,171,226,.14); color: var(--swift-blue-dark); }
+    .lookup-source-box { background: rgba(41,171,226,.06); border: 1px dashed rgba(41,171,226,.35); border-radius: 12px; padding: .85rem 1rem; }
     .type-icon.t-lookup { background: rgba(41,171,226,.16); color: var(--swift-blue-dark); }
 
     .field-card .f-label { font-weight: 650; color: var(--swift-navy); font-size: .92rem; }
@@ -221,13 +222,14 @@
                         <div class="f-meta">
                             <span class="f-badge">{{ f.get_field_type_display }}</span>
                             <span class="f-badge">col-{{ f.width }}</span>
+                            {% if f.lookup_category_id and f.field_type == "searchable_select" %}<span class="f-badge badge-lookup"><i class="bi bi-arrow-right-short"></i>{{ f.lookup_category.name }}</span>{% endif %}
                             {% if f.required %}<span class="f-badge badge-req"><i class="bi bi-asterisk" style="font-size:.55rem;"></i> Required</span>{% endif %}
                             {% if not f.is_active %}<span class="f-badge badge-inactive"><i class="bi bi-eye-slash"></i> Inactive</span>{% endif %}
                         </div>
                     </div>
                     <div class="f-actions">
                         <button class="icon-btn" title="Edit"
-                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, '{{ f.max_length|default_if_none:"" }}', this.dataset.options || '')" data-options="{% for opt in f.options.all %}{% if opt.is_active %}{{ opt.label }}&#10;{% endif %}{% endfor %}">
+                                onclick="showEditModal({{ f.pk }}, '{{ f.label|escapejs }}', '{{ f.field_type }}', {{ f.width }}, {{ f.required|yesno:'true,false' }}, '{{ f.placeholder|escapejs }}', '{{ f.help_text|escapejs }}', {{ f.show_in_list|yesno:'true,false' }}, {{ f.show_in_detail|yesno:'true,false' }}, {{ f.show_in_add|yesno:'true,false' }}, {{ f.show_in_edit|yesno:'true,false' }}, '{{ f.max_length|default_if_none:"" }}', this.dataset.options || '', '{{ f.lookup_category_id|default_if_none:"" }}')" data-options="{% for opt in f.options.all %}{% if opt.is_active %}{{ opt.label }}&#10;{% endif %}{% endfor %}">
                             <i class="bi bi-pencil"></i>
                         </button>
                         {% if f.is_active %}
@@ -275,6 +277,8 @@
                         <label class="form-label fw-semibold">{{ f.label }}{% if f.required %} <span class="text-danger">*</span>{% endif %}</label>
                         {% if f.field_type == "textarea" %}
                         <textarea class="form-control form-control-sm" rows="2" disabled placeholder="{{ f.placeholder }}"></textarea>
+                        {% elif f.lookup_category_id and f.field_type == "searchable_select" %}
+                        <input type="text" class="form-control form-control-sm" disabled placeholder="Search {{ f.lookup_category.name }}…">
                         {% elif f.field_type == "select" or f.field_type == "searchable_select" %}
                         <select class="form-select form-select-sm" disabled>
                             <option>—</option>
@@ -325,7 +329,7 @@
                             <select name="field_type" class="form-select" id="add-field-type" onchange="toggleOptions(this,'add-options-group')">
                                 <option value="text">Single Line Text</option>
                                 <option value="textarea">Multi-Line Text</option>
-                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown</option>
+                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown (Lookup)</option>
                                 <option value="number">Number</option>
                                 <option value="date">Date</option>
                                 <option value="email">Email</option>
@@ -359,6 +363,27 @@
                         <div class="col-12">
                             <label class="form-label fw-semibold">Help Text</label>
                             <input type="text" name="help_text" class="form-control" placeholder="Short description shown below the field">
+                        </div>
+                        <div class="col-12" id="add-source-group" style="display:none;">
+                            <div class="lookup-source-box">
+                                <div class="row g-3">
+                                    <div class="col-md-5">
+                                        <label class="form-label fw-semibold">Options Source</label>
+                                        <select name="options_source" id="add-options-source" class="form-select" onchange="toggleOptions(document.getElementById('add-field-type'),'add-options-group')">
+                                            <option value="manual">Manual (type options)</option>
+                                            <option value="assets">Lookup (existing records)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-7" id="add-lookup-cat-group" style="display:none;">
+                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Lookup Source <span class="text-danger">*</span></label>
+                                        <select name="lookup_category" id="add-lookup-category" class="form-select">
+                                            <option value="">— choose a category —</option>
+                                            {% for c in category_choices %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-text mt-2">Manual: type the options yourself. Lookup: list the existing records of a category (Employee, Mouse, CPU, Monitor, Workstation…) so users search &amp; pick one.</div>
+                            </div>
                         </div>
                         <div class="col-12" id="add-options-group" style="display:none;">
                             <label class="form-label fw-semibold">Dropdown Options <span class="text-muted fw-normal small">(one per line)</span></label>
@@ -404,7 +429,7 @@
                             <select name="field_type" id="edit-field-type" class="form-select" onchange="toggleOptions(this,'edit-options-group')">
                                 <option value="text">Single Line Text</option>
                                 <option value="textarea">Multi-Line Text</option>
-                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown</option>
+                                <option value="select">Dropdown</option><option value="searchable_select">Searchable Dropdown (Lookup)</option>
                                 <option value="number">Number</option>
                                 <option value="date">Date</option>
                                 <option value="email">Email</option>
@@ -439,6 +464,27 @@
                             <label class="form-label fw-semibold">Help Text</label>
                             <input type="text" name="help_text" id="edit-help-text" class="form-control">
                         </div>
+                        <div class="col-12" id="edit-source-group" style="display:none;">
+                            <div class="lookup-source-box">
+                                <div class="row g-3">
+                                    <div class="col-md-5">
+                                        <label class="form-label fw-semibold">Options Source</label>
+                                        <select name="options_source" id="edit-options-source" class="form-select" onchange="toggleOptions(document.getElementById('edit-field-type'),'edit-options-group')">
+                                            <option value="manual">Manual (type options)</option>
+                                            <option value="assets">Lookup (existing records)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-7" id="edit-lookup-cat-group" style="display:none;">
+                                        <label class="form-label fw-semibold"><i class="bi bi-diagram-3 text-primary me-1"></i>Lookup Source <span class="text-danger">*</span></label>
+                                        <select name="lookup_category" id="edit-lookup-category" class="form-select">
+                                            <option value="">— choose a category —</option>
+                                            {% for c in category_choices %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-text mt-2">Manual: type the options yourself. Lookup: list the existing records of a category (Employee, Mouse, CPU, Monitor, Workstation…) so users search &amp; pick one.</div>
+                            </div>
+                        </div>
                         <div class="col-12" id="edit-options-group" style="display:none;">
                             <label class="form-label fw-semibold">Dropdown Options <span class="text-muted fw-normal small">(one per line)</span></label>
                             <textarea name="options" id="edit-options" class="form-control" rows="5"></textarea>
@@ -465,13 +511,18 @@
 
 <script>
 function showAddModal() {
+    var addForm = document.getElementById('addFieldModal').querySelector('form');
+    if (addForm) addForm.reset();
+    toggleOptions(document.getElementById('add-field-type'), 'add-options-group');
     new bootstrap.Modal(document.getElementById('addFieldModal')).show();
 }
 
-function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, maxLength, optionsText) {
+function showEditModal(fid, label, ftype, width, required, placeholder, helpText, sil, sid, sia, sie, maxLength, optionsText, lookupCategory) {
     document.getElementById('edit-label').value = label;
     var ftSel = document.getElementById('edit-field-type');
     ftSel.value = ftype;
+    document.getElementById('edit-lookup-category').value = lookupCategory || '';
+    document.getElementById('edit-options-source').value = lookupCategory ? 'assets' : 'manual';
     toggleOptions(ftSel, 'edit-options-group');
     document.getElementById('edit-options').value = (optionsText || '').trim();
     document.getElementById('edit-width').value = String(width);
@@ -489,7 +540,14 @@ function showEditModal(fid, label, ftype, width, required, placeholder, helpText
 }
 
 function toggleOptions(sel, groupId) {
-    document.getElementById(groupId).style.display = (sel.value === 'select' || sel.value === 'searchable_select') ? '' : 'none';
+    var prefix = groupId.split('-')[0];            // 'add' or 'edit'
+    var isSearchable = sel.value === 'searchable_select';
+    var useLookup = isSearchable && document.getElementById(prefix + '-options-source').value === 'assets';
+    document.getElementById(prefix + '-source-group').style.display = isSearchable ? '' : 'none';
+    document.getElementById(prefix + '-lookup-cat-group').style.display = useLookup ? '' : 'none';
+    document.getElementById(prefix + '-lookup-category').required = useLookup;
+    // typed options: plain Dropdown, or Searchable Dropdown in Manual mode
+    document.getElementById(groupId).style.display = (sel.value === 'select' || (isSearchable && !useLookup)) ? '' : 'none';
 }
 
 (function() {

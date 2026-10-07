@@ -354,20 +354,35 @@ class LegacyHandBuiltStillRenderTests(BuilderDisplayBase):
     their existing hand-built List and Detail layouts (existing data safe)."""
 
     def test_unconfigured_special_categories_render_as_before(self):
+        # (category, extra_details, real Asset columns, text that must appear)
+        # Inputs use the CURRENT real-sheet names: Hard Disk's "Purpose" (the old
+        # "Details" column became "Status"), Employee status is the real status
+        # column, Inside Cupboard's size is "Capacity / Size".
         cases = [
-            ("Hard Disk", {"Size": "1 TB", "Conditions": "ok", "Details": "legacy-cs"},
-             ["Hard Disk Number", "Conditions", "legacy-cs"]),
-            ("Employee", {"Status": "Resigned"}, ["Employee ID", "Resigned"]),
-            ("Air Conditioner", {"Status": "1.5 Ton Hall", "Details": "2025"},
-             ["Capacity / Location", "1.5 Ton Hall"]),
-            ("Inside Cupboard", {"Item Type": "HDD", "Size": "500 GB"},
+            ("Hard Disk", {"Size": "1 TB", "Conditions": "ok", "Purpose": "legacy-cs"}, {},
+             ["Hard disk Number", "Conditions", "legacy-cs"]),
+            ("Employee", {}, {"status": "Resigned"}, ["Resigned"]),
+            # Air Conditioner has no hand-built column set any more (its
+            # "Capacity / Location" header only exists once builder fields are
+            # set up - see fix_air_conditioner_fields); the data must still show.
+            ("Air Conditioner", {"Status": "1.5 Ton Hall", "Details": "2025"}, {},
+             ["1.5 Ton Hall"]),
+            ("Inside Cupboard", {"Item Type": "HDD", "Capacity / Size": "500 GB"}, {},
              ["Item Type", "500 GB"]),
         ]
-        for name, extra, expected in cases:
+        for name, extra, cols, expected in cases:
             cat = fresh_category(name)
-            a = self.mk(cat, f"L-{name[:2]}", extra_details=extra)
+            a = self.mk(cat, f"L-{name[:2]}", extra_details=extra, **cols)
             html, resp = self.list_html(cat)
             self.assertIsNone(resp.context["list_columns"], name)
+            # The legacy Hard Disk header is the real sheet's "Hard disk  Number"
+            # (two spaces); browsers collapse that, so compare collapsed text.
+            flat = " ".join(html.split())
             for t in expected:
-                self.assertIn(t, html, f"{name}: {t}")
-            self.detail_html(a)
+                with self.subTest(category=name, expected=t):
+                    self.assertIn(t, flat, f"{name}: {t}")
+            _, dresp = self.detail_html(a)
+            if name == "Employee":
+                # the list header is "Tag"; the real sheet's "Employee Id" is the Detail label
+                labels = [f["label"] for f in dresp.context["detail_fields"]]
+                self.assertIn("Employee Id", labels)
