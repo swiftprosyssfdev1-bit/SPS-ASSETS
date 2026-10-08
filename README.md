@@ -1,114 +1,174 @@
 # Swift ProSys — Asset Register
 
-Django app to track every company asset (workstations, monitors, keyboards,
-mice, UPS, hard disks, software licenses, A/Cs, biometrics, networking gear,
-employees, vendors, projects, incidents, etc.) with a branded admin login, a
-dashboard, bulk import from spreadsheets, exports, and automatic
-"previous vs current" history for every asset.
+A Django web app for tracking every company asset (workstations, CPUs, monitors,
+keyboards, mice, UPS, hard disks, licenses, A/Cs, biometrics, networking gear,
+employees, vendors, projects, incidents, etc.) across multiple branches, with
+admin-configurable fields, bulk import, password-protected Excel export, and a
+full audit trail.
 
-## What's included
+## Features
 
-- **Login page** (`/login/`) — branded, restricted to staff accounts.
-- **Dashboard** (`/`) — total assets, status breakdown, per-category counts,
-  and a live feed of recent changes (old value → new value, who changed it,
-  when).
-- **Category pages** (`/category/<id>/`) — click a category card to see every
-  asset in it, current vs previous holder/location, with add/edit/delete.
-- **Search** (`/search/`) — find assets across categories.
-- **History** (`/history/`) — full audit trail across all assets.
-- **Bulk import** (`/import/`) — upload a `.csv`, `.txt`, or `.xlsx` file,
-  preview/confirm the parsed rows (`/import/confirm/`), and import up to
-  20,000 rows at once. Understands many header spellings from the old
-  per-category spreadsheets (e.g. "S.No", "Condition", "Assigned To") so
-  legacy sheets can usually be uploaded with little to no renaming. A sample
-  template is downloadable at `/import/sample/`.
-- **Export** (`/export/`) — download current asset data.
-- **Clear all** (`/clear-all/`) — wipes all asset data (destructive, staff
-  only).
-- **Django Admin** (`/admin/`) — full add/edit/delete for categories and
-  assets.
-- **Automatic history**: changing an asset's status, assigned user, location,
-  brand, model, or serial number and saving writes a row to `AssetHistory` —
-  "previous" and "now" are always available with no manual work.
-- **Per-category dynamic fields** (`assets/category_fields.py`) — categories
-  like Keyboard, Mouse, Monitor, Hard Disk, and Laptop show extra fields
-  specific to that category (e.g. DPI, panel type, disk type), stored in
-  `extra_details` with no migration needed. Fields flagged as sensitive
-  (passwords, license/product keys) are filtered out of import/UI by default.
+**Assets**
+- **Dashboard** (`/`) — totals, status breakdown, per-category counts and a live
+  feed of recent changes.
+- **Categories** (`/category/<id>/`) — list, add, edit and delete assets per
+  category. Categories themselves can be added, renamed or removed from the UI.
+- **Search** (`/search/`) with live suggestions.
+- **Deactivate / reactivate** — assets can be retired without losing data
+  (`/deactivated/`).
+- **History** (`/history/`) — automatic "previous vs now" record for every
+  asset change (who, when, old value → new value).
 
-## How the data model works
+**Workstations** (`/workstation/`)
+- Dedicated Workstation module with its own field builder, bulk import, and
+  rename option.
+- Fields can be **Lookups** that link a workstation to other assets (CPU,
+  Monitor, Keyboard, Mouse, UPS, Employee). Tick **Allow multiple** when one
+  workstation can have several (e.g. Monitors, UPS units).
 
-Rather than a separate table per asset type, there's one flexible `Asset`
-model with a `category` (ForeignKey to `AssetCategory`) and a JSON
-`extra_details` field for anything category-specific. This means:
+**Field Builders** (Super Admin)
+- Add, edit, reorder, deactivate and delete fields per category (and for
+  Workstations) with no code change or migration. Supported types: single-line
+  text, multi-line text, dropdown, searchable dropdown, number, date, email,
+  URL and lookup. Each field has width, required, and show-in-list / detail /
+  add / edit options.
 
-- New categories can be added anytime from the admin panel without touching
-  code.
-- Common fields (status, current/previous holder, current/previous location,
-  brand, model, serial, purchase/service dates, linked workstation, notes)
-  are shared and searchable/filterable across every category.
+**Branches and access control**
+- **Super Admin** (Django superuser): all branches, branch and admin
+  management, field builders, import, export password, audit log.
+- **Branch Admin** (staff user with branch access): sees and manages only the
+  branches assigned to them. Access is checked server-side in
+  `assets/permissions.py`.
+- Branches are managed from the UI (`/branches/`, `/admins/`).
 
-19 starter categories are pre-seeded via `seed_categories` to match the
-original spreadsheet tabs: Employee, Workstation, CPU / System Unit, Monitor,
-Keyboard, Mouse, UPS, Bluetooth Device, Hard Disk, Software / OS License, Air
-Conditioner, Biometric Device, Networking Equipment, Other Asset, Project
-Details, Project Backup, Inside Cupboard, IT Vendor, Incident Register.
+**Import / Export**
+- **Import** (`/import/`) — `.csv`, `.txt`, `.xlsx`; preview and confirm before
+  saving; up to 20,000 rows per file and `MAX_IMPORT_UPLOAD_MB` (default 10 MB).
+  A sample template is at `/import/sample/`. Understands many legacy header
+  spellings.
+- **Export** (`/export/`) — Excel download, always password-protected. The
+  Super Admin sets the password under **Manage → Export Password**
+  (stored encrypted, never shown). Import uses the same password to open
+  exported files. Export is disabled until a password is set.
 
-## Setup
+**Audit and safety**
+- **Config Audit Log** (`/config-audit/`) — records every change to categories,
+  fields and field order (who, when, what changed).
+- **Delete All** on the audit log is Super Admin only and asks for the
+  Super Admin password. A "cleared" entry is left behind so it is always
+  visible who deleted it.
+- **Clear all assets** (`/clear-all/`) is destructive and only works when
+  `ALLOW_CLEAR_ALL=True`. Keep it `False` in production.
+- Sensitive fields (passwords, license keys) are filtered out of import and
+  display by default.
+
+## Tech stack
+
+Python 3 · Django 5.2 · MySQL (SQLite for local dev) · openpyxl / xlrd /
+msoffcrypto-tool (Excel) · cryptography · WhiteNoise (static files) · Gunicorn.
+Time zone: `Asia/Kolkata`.
+
+## Project layout
+
+```
+Assets/
+├── manage.py
+├── .env                   # local settings (never commit)
+├── requirements.txt
+├── asset_register/        # Django project (settings, urls, wsgi)
+├── assets/                # main app
+│   ├── models.py          # Asset, AssetField, Workstation, Branch, ConfigAuditLog ...
+│   ├── views.py, urls.py, forms.py
+│   ├── permissions.py     # Super Admin / Branch Admin rules
+│   ├── import_utils.py    # CSV / Excel import
+│   ├── excel_security.py  # export password encryption
+│   ├── relations.py       # lookup relationships between assets
+│   ├── management/commands/
+│   ├── templates/, templatetags/, tests/
+├── static/                # project static files (STATICFILES_DIRS)
+└── staticfiles/           # collectstatic output (generated)
+```
+
+## Setup (local)
 
 ```bash
 python -m venv venv
-source venv/bin/activate        # venv\Scripts\activate on Windows
+venv\Scripts\activate            # Linux/Mac: source venv/bin/activate
 pip install -r requirements.txt
 
+copy .env.example .env           # or create .env (see below)
+
 python manage.py migrate
-python manage.py seed_categories      # loads the starter categories
-python manage.py createsuperuser      # your admin login
+python manage.py seed_categories          # starter categories
+python manage.py seed_dynamic_fields      # category fields (use --dry-run first)
+python manage.py seed_workstation_fields  # workstation fields (safe to re-run)
+python manage.py createsuperuser
 
 python manage.py runserver
 ```
 
-Then visit:
-- `http://127.0.0.1:8000/` → login page → dashboard
-- `http://127.0.0.1:8000/admin/` → full admin panel to add/edit assets
+Open `http://127.0.0.1:8000/` and log in. Only staff accounts can log in.
 
-## Bringing in the old spreadsheet data
+Run tests with `python manage.py test assets`.
 
-Two separate paths exist for getting spreadsheet data in:
+## Environment variables (`.env`)
 
-- **`/import/` (web UI)** — for clean, single-sheet files already close to
-  the app's own column format. Best for ongoing day-to-day imports.
-- **`manage.py import_legacy_assets /path/to/Assets.xlsx --dry-run`** — a
-  one-time management command written specifically for the old messy
-  multi-sheet tracking file, where each sheet (keyboard, Monitor, Mouse,
-  UPS, Hard disk, Bluetooth, Software and OS, others, WorkStation_List) has
-  its own column shape. Sheets that aren't per-asset records (System,
-  Project Details, Project backup, inside the Cupboard, IT_Vendor List,
-  Incident Register) are intentionally skipped and need manual review.
-  Always run with `--dry-run` first and read the report before committing.
+| Variable | Purpose |
+|---|---|
+| `DJANGO_SECRET_KEY` | Required when `DJANGO_DEBUG` is off |
+| `DJANGO_DEBUG` | `True` for local dev, default `False` |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated hostnames |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated origins (e.g. `https://assets.example.com`) |
+| `DJANGO_HTTPS` | Secure cookies; defaults to on when debug is off. Set `False` only if serving plain HTTP |
+| `DJANGO_SSL_REDIRECT` | Default `False` (the proxy already redirects) |
+| `DB_ENGINE` | Set to `sqlite` to use SQLite (file: `DB_NAME_SQLITE`, default `db.sqlite3`) |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | MySQL (defaults: `asset_register`, `root`, empty, `localhost`, `3306`) |
+| `ALLOW_CLEAR_ALL` | Enables `/clear-all/` (wipes all assets). Default `False` |
+| `MAX_IMPORT_UPLOAD_MB` | Max import file size, default `10` |
 
-Two related cleanup commands:
-- `manage.py reroute_other_assets [--apply]` — moves rows that landed in the
-  "Other Asset" catch-all into their real category based on a stored
-  Device Type, for data imported before that routing existed.
-- `manage.py scrub_legacy_secrets [--apply]` — finds/removes plain-text
-  secrets (passwords, license keys) that were imported into
-  `extra_details` before the sensitive-field filter existed. Take a DB
-  backup before using `--apply`.
+## Deployment
 
-## Database
+Built for a reverse-proxy setup (Coolify + Traefik): HTTPS terminates at the
+proxy and Django trusts `X-Forwarded-Proto`.
 
-Controlled by env vars (see `.env` / `python-dotenv`):
-- If `DB_NAME_SQLITE` (or no MySQL env vars) is set, SQLite is used —
-  convenient for local development.
-- Otherwise the app uses MySQL (`DB_NAME`, `DB_USER`, `DB_PASSWORD`,
-  `DB_HOST`, `DB_PORT`), which is the production setup.
+1. Set `DJANGO_DEBUG=False`, a real `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`,
+   `DJANGO_CSRF_TRUSTED_ORIGINS` and the MySQL variables.
+2. Run `python manage.py migrate` and `python manage.py collectstatic --noinput`.
+3. Start with `gunicorn asset_register.wsgi`.
+4. Keep `ALLOW_CLEAR_ALL=False`.
 
-## Notes / things to decide before production use
+## Bringing in old spreadsheet data
 
-- `SECRET_KEY` in `asset_register/settings.py` is a dev placeholder — replace
-  it and set `DEBUG = False` with a real `ALLOWED_HOSTS` before deploying.
-- Only staff/superuser accounts can log in. Regular (non-staff) users can't
-  currently reach the dashboard.
-- Run `scrub_legacy_secrets` (dry run first) after any bulk import of old
-  spreadsheets to catch plain-text secrets that shouldn't be stored.
+- **`/import/`** — for clean single-sheet files close to the app's column
+  format. Best for day-to-day imports.
+- **`manage.py import_legacy_assets /path/to/Assets.xlsx --dry-run`** — one-time
+  command for the old multi-sheet tracking file. Always dry-run first and read
+  the report before committing.
+
+## Management commands
+
+Most take `--dry-run` or `--apply`. Run the dry run first and take a database
+backup before any `--apply`.
+
+| Command | What it does |
+|---|---|
+| `seed_categories` | Loads the starter categories |
+| `seed_dynamic_fields` | Creates field rows from the built-in category definitions |
+| `seed_workstation_fields` | Creates the Workstation fields (safe to re-run) |
+| `migrate_workstation_data` | Moves legacy workstation assets into the Workstation module |
+| `audit_workstation_migration`, `inspect_workstation_category` | Check the workstation migration |
+| `import_legacy_assets` | One-time import of the old multi-sheet workbook |
+| `reroute_other_assets` | Moves "Other Asset" rows into their real category |
+| `rekey_extra_details` | Moves old-keyed values onto the field-builder keys |
+| `scrub_legacy_secrets` | Finds and removes plain-text secrets from imported data |
+| `trim_list_columns` | Chooses which fields show in a category's list view |
+| `backfill_cupboard_ids` | Fills ID / Device Name / Device Type on cupboard rows |
+| `merge_project_backup_duplicates` | Merges `<tag>-2`, `<tag>-3` duplicates into `<tag>` |
+| `fix_air_conditioner_fields`, `fix_air_conditioner_status`, `fix_project_details_names`, `fix_project_details_status` | One-off data clean-ups |
+
+## Notes
+
+- Never commit `.env`. Replace any development secret key before deploying.
+- Take a database backup before bulk imports, `--apply` commands, or
+  Clear All.
+- Run `scrub_legacy_secrets` (dry run first) after importing old spreadsheets.
