@@ -8,6 +8,15 @@
     <div class="alert alert-warning">{{ problem }}</div>
     <a href="{% url 'assets:category_detail' category.id %}" class="btn btn-outline-secondary">Back</a>
     {% else %}
+    {% if is_builtin %}
+    <div class="alert alert-danger">
+        <strong><i class="bi bi-exclamation-octagon-fill me-1"></i> Built-in category</strong><br>
+        "{{ category.name }}" is used by the system (import/export templates, special field and tag rules,
+        and links to other categories). Deleting it can <strong>break imports, exports and related pages</strong>
+        that depend on it, and the category may be re-created the next time the default categories are seeded.
+        This can't be undone.
+    </div>
+    {% endif %}
     {% if asset_count %}
     <div class="alert alert-danger">
         <strong>Warning:</strong> {{ asset_count }} asset record(s) belong to this category
@@ -20,6 +29,12 @@
     {% endif %}
     <form method="post">
         {% csrf_token %}
+        {% if is_builtin %}
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="confirm_builtin" value="yes" id="confirmBuiltin" required>
+            <label class="form-check-label" for="confirmBuiltin">I understand this is a built-in category and I still want to delete it</label>
+        </div>
+        {% endif %}
         {% if asset_count %}
         <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" name="confirm_delete_assets" value="yes" id="confirmDeleteAssets" required>

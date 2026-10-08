@@ -5,3 +5,5 @@ mysqlclient>=2.2
 xlrd>=2.0
 msoffcrypto-tool>=5.4
 cryptography>=42
+whitenoise>=6.6
+gunicorn>=22.0

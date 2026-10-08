@@ -42,6 +42,8 @@ def get_export_password():
 
         row = ExportPassword.objects.order_by("-id").first()
         if row:
+            if not row.encrypted_value:
+                return ""   # Super Admin removed the password: exports are not protected
             return _fernet().decrypt(row.encrypted_value.encode()).decode()
     except Exception:
         # Table not migrated yet, or SECRET_KEY changed since it was saved.
@@ -64,12 +66,41 @@ def set_export_password(new_password, user=None):
     return row
 
 
+def disable_export_password(user=None):
+    """Super Admin 'remove password': exports are downloaded as plain Excel
+    files that open without a password. Stored as a row with an empty value
+    (so the .env fallback is not used either) until a new password is set."""
+    from .models import ExportPassword
+
+    row = ExportPassword.objects.order_by("-id").first()
+    if row is None:
+        row = ExportPassword()
+    row.encrypted_value = ""
+    row.updated_by = user
+    row.save()
+    ExportPassword.objects.exclude(pk=row.pk).delete()
+    return row
+
+
+def export_protection_disabled():
+    """True when the Super Admin has removed the export password on purpose."""
+    try:
+        from .models import ExportPassword
+
+        row = ExportPassword.objects.order_by("-id").first()
+        return bool(row and not row.encrypted_value)
+    except Exception:
+        return False
+
+
 def export_password_status():
     """(is_set, source, updated_at, updated_by) for the settings page.
     Never returns the password itself."""
     from .models import ExportPassword
 
     row = ExportPassword.objects.select_related("updated_by").order_by("-id").first()
+    if row and not row.encrypted_value:
+        return False, "disabled", row.updated_at, row.updated_by
     if row:
         return True, "app", row.updated_at, row.updated_by
     if (getattr(settings, "EXPORT_FILE_PASSWORD", "") or "").strip():

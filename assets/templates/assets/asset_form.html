@@ -648,6 +648,13 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             ctl.outerHTML = html;
         });
+        // Max Length from the Category Builder (text-like inputs only)
+        Object.keys(meta || {}).forEach(function (col) {
+            const wrap = CORE_WRAPS[col], m = meta[col];
+            if (!wrap || !m || !m.max_length || col === 'status') return;
+            const c = wrap.querySelector('input[type=text], input[type=email], input[type=url], textarea');
+            if (c) c.setAttribute('maxlength', m.max_length);
+        });
     }
 
     function applyCategory(categoryId, preserveValues) {

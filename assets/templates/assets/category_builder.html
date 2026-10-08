@@ -236,7 +236,7 @@
                         <form method="post" action="{% url 'assets:builder_field_deactivate' category.id f.pk %}" style="display:inline;">
                             {% csrf_token %}
                             <button type="submit" class="icon-btn danger" title="Deactivate (data preserved)"
-                                    onclick="return confirm('Deactivate field {{ f.label|escapejs }}? Existing asset data is NOT deleted.')">
+                                    onclick="return confirm('{% if is_builtin %}WARNING: {{ category.name|escapejs }} is a built-in category. The system (imports, exports, templates) may rely on this field, and hiding it can break them.\n\n{% endif %}{% if record_count %}This category has {{ record_count }} record(s){% if f.filled_count %}, and {{ f.filled_count }} of them have a value for {{ f.label|escapejs }}{% else %}, but none have a value for {{ f.label|escapejs }}{% endif %}.\n\n{% endif %}Deactivate field {{ f.label|escapejs }}? Existing asset data is NOT deleted.')">
                                 <i class="bi bi-eye-slash"></i>
                             </button>
                         </form>
@@ -247,13 +247,7 @@
                                 <i class="bi bi-eye"></i>
                             </button>
                         </form>
-                        <form method="post" action="{% url 'assets:builder_field_delete' category.id f.pk %}" style="display:inline;">
-                            {% csrf_token %}
-                            <button type="submit" class="icon-btn danger" title="Delete permanently"
-                                    onclick="return confirm('Permanently delete field {{ f.label|escapejs }}? This cannot be undone. Any old stored values for it are simply left unused, not erased.')">
-                                <i class="bi bi-trash3"></i>
-                            </button>
-                        </form>
+                        <a href="{% url 'assets:builder_field_delete' category.id f.pk %}" class="icon-btn danger" title="Delete permanently" style="text-decoration:none;"><i class="bi bi-trash3"></i></a>
                         {% endif %}
                     </div>
                 </div>

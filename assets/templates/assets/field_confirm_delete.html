@@ -1,0 +1,44 @@
+{% extends "assets/base.html" %}
+{% block title %}Delete Field{% endblock %}
+{% block content %}
+
+<div class="card card-stat p-4 mx-auto" style="max-width: 520px;">
+    <h5 class="text-secondary mb-3">Delete field "{{ field.label }}"?</h5>
+    {% if problem %}
+    <div class="alert alert-warning">{{ problem }}</div>
+    <a href="{% url 'assets:category_builder' category.id %}" class="btn btn-outline-secondary">Back</a>
+    {% else %}
+    {% if is_builtin %}
+    <div class="alert alert-danger">
+        <strong><i class="bi bi-exclamation-octagon-fill me-1"></i> Built-in category</strong><br>
+        "{{ category.name }}" is used by the system (import/export templates, special field and tag rules).
+        Deleting this field can <strong>break imports, exports and related pages</strong> that depend on it.
+    </div>
+    {% endif %}
+    {% if filled_count %}
+    <div class="alert alert-danger">
+        <strong>Warning:</strong> {{ filled_count }} of {{ record_count }} record(s) in <strong>{{ category.name }}</strong>
+        have a value for this field. Deleting the field <strong>permanently removes it from every form and list</strong>.
+        The old values stay stored but are never shown again. This can't be undone.
+    </div>
+    {% elif record_count %}
+    <p class="text-muted">{{ category.name }} has {{ record_count }} record(s), but none have a value for this field.
+        This permanently deletes the field. This can't be undone.</p>
+    {% else %}
+    <p class="text-muted">This permanently deletes the field. {{ category.name }} has no records, so no data is lost. This can't be undone.</p>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        {% if needs_confirm %}
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="confirm_delete_field" value="yes" id="confirmDeleteField" required>
+            <label class="form-check-label" for="confirmDeleteField">I understand, delete the field "{{ field.label }}"</label>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-danger">{% if needs_confirm %}Delete Field{% else %}Yes, Delete{% endif %}</button>
+        <a href="{% url 'assets:category_builder' category.id %}" class="btn btn-outline-secondary">Cancel</a>
+    </form>
+    {% endif %}
+</div>
+
+{% endblock %}

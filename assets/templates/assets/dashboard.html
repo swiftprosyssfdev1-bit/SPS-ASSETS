@@ -1,32 +1,92 @@
 {% extends "assets/base.html" %}
 {% block title %}Dashboard - Asset Register{% endblock %}
 {% block content %}
+<style>
+    .dash-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom:1.4rem; }
+    .dash-head h3 { font-weight:800; color:var(--swift-navy); letter-spacing:-.4px; margin:0; font-size:1.65rem; }
+    .dash-sub { color:#6b7787; font-size:.88rem; margin-top:.2rem; }
+    .dash-sub .dot { margin:0 .4rem; color:#c2cad6; }
+    .panel { background:#fff; border:1px solid #e6eaf1; border-radius:14px; box-shadow:0 1px 2px rgba(20,30,45,.04); }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; padding:.9rem 1.15rem; border-bottom:1px solid #eef1f6; }
+    .panel-head h6 { margin:0; font-weight:700; color:var(--swift-navy); font-size:.98rem; }
+    .panel-body { padding:1.1rem 1.15rem; }
+    .sec-title { display:flex; align-items:center; gap:.75rem; margin:1.6rem 0 .8rem; }
+    .sec-title h5 { margin:0; font-weight:700; color:var(--swift-navy); font-size:1.05rem; }
+    .grp-label { display:flex; align-items:center; gap:.7rem; font-size:.72rem; font-weight:700; letter-spacing:.9px; text-transform:uppercase; color:#8794a6; margin:1.1rem 0 .65rem; }
+    .grp-label::after { content:""; flex:1; height:1px; background:#e3e8ef; }
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+    /* KPI strip */
+    .kpi { display:flex; align-items:center; gap:.95rem; padding:1.05rem 1.15rem; height:100%; position:relative; overflow:hidden; }
+    .kpi::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--kc,var(--swift-blue)); }
+    .kpi-ico { width:46px; height:46px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.3rem; flex:none; color:var(--kc,var(--swift-blue)); background:color-mix(in srgb, var(--kc,var(--swift-blue)) 13%, #fff); }
+    .kpi-label { font-size:.76rem; font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:#7a8798; }
+    .kpi-val { font-size:1.85rem; font-weight:800; color:var(--swift-navy); line-height:1.1; letter-spacing:-.5px; }
+    .kpi-sub { font-size:.78rem; color:#8794a6; }
+    .kpi-bar { height:5px; border-radius:9px; background:#e9eef4; margin-top:.4rem; overflow:hidden; }
+    .kpi-bar > span { display:block; height:100%; background:var(--kc); border-radius:9px; }
+    a.kpi-link { text-decoration:none; color:inherit; display:block; height:100%; }
+    a.kpi-link .panel { transition:box-shadow .15s ease, transform .15s ease; height:100%; }
+    a.kpi-link:hover .panel { box-shadow:0 8px 20px -10px rgba(20,30,45,.25); transform:translateY(-2px); }
+
+    /* Needs attention */
+    .attn { border-left:4px solid #e5484d; }
+    .attn-row { display:flex; align-items:center; gap:.9rem; padding:.65rem 1.15rem; border-top:1px solid #f1f3f7; font-size:.9rem; }
+    .attn-row:first-of-type { border-top:0; }
+    .attn-name { font-weight:600; color:var(--swift-navy); }
+    .attn-meta { color:#7a8798; font-size:.82rem; }
+    .pill { display:inline-flex; align-items:center; gap:.3rem; padding:.18rem .6rem; border-radius:99px; font-size:.72rem; font-weight:600; white-space:nowrap; }
+    .pill.red { background:#fdecec; color:#c62828; }
+    .pill.blue { background:#e6f5fc; color:var(--swift-blue-dark); }
+    .pill.grey { background:#eef1f6; color:#5a6675; }
+    .btn-open { border:1px solid #dfe5ed; background:#fff; border-radius:8px; font-size:.8rem; font-weight:600; padding:.25rem .75rem; color:var(--swift-navy); text-decoration:none; margin-left:auto; }
+    .btn-open:hover { background:var(--swift-navy); color:#fff; border-color:var(--swift-navy); }
+
+    /* Category cards */
+    .cat-card { display:flex; align-items:center; gap:.9rem; padding:.95rem 1rem; background:#fff; border:1px solid #e6eaf1; border-radius:14px; height:100%; transition:border-color .15s, box-shadow .15s, transform .15s; box-shadow:0 1px 2px rgba(20,30,45,.04); }
+    .cat-card:hover { border-color:#bfe3f4; box-shadow:0 10px 22px -12px rgba(28,127,168,.35); transform:translateY(-2px); }
+    .cat-ico { width:44px; height:44px; border-radius:12px; background:#fff3e2; color:var(--swift-orange); display:flex; align-items:center; justify-content:center; font-size:1.2rem; flex:none; }
+    .cat-name { font-size:.84rem; font-weight:600; color:#5a6675; line-height:1.2; }
+    .cat-num { font-size:1.55rem; font-weight:800; color:var(--swift-navy); line-height:1.15; letter-spacing:-.4px; }
+    .cat-card .pill { margin-left:auto; align-self:flex-start; }
+    .cat-zero { opacity:.6; }
+    .cat-more { font-size:.76rem; color:#8794a6; }
+
+    /* Recent changes */
+    .rc-table { margin:0; }
+    .rc-table thead th { background:#f7f9fc; color:#7a8798; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.7px; border-bottom:1px solid #e6eaf1; padding:.7rem 1.15rem; }
+    .rc-table td { padding:.75rem 1.15rem; border-color:#f0f2f6; vertical-align:middle; font-size:.88rem; }
+    .rc-table tbody tr:hover { background:#fafcfe; }
+    .rc-av { width:30px; height:30px; border-radius:50%; background:#e6f5fc; color:var(--swift-blue-dark); font-weight:700; font-size:.78rem; display:inline-flex; align-items:center; justify-content:center; margin-right:.5rem; }
+    .rc-asset { font-weight:600; color:var(--swift-navy); }
+    .rc-tag { font-size:.76rem; color:#8794a6; }
+    .btn-soft { border:1px solid #dfe5ed; background:#fff; color:#4a5568; font-weight:600; font-size:.85rem; border-radius:9px; padding:.42rem .9rem; text-decoration:none; display:inline-flex; align-items:center; gap:.4rem; }
+    .btn-soft:hover { background:#f5f8fb; color:var(--swift-navy); }
+    .btn-soft.sm { font-size:.78rem; padding:.28rem .7rem; }
+    .btn-primary-swift { background:var(--swift-blue); border:1px solid var(--swift-blue); color:#fff; font-weight:600; font-size:.85rem; border-radius:9px; padding:.42rem .95rem; text-decoration:none; display:inline-flex; align-items:center; gap:.4rem; box-shadow:0 4px 12px -4px rgba(41,171,226,.55); }
+    .btn-primary-swift:hover { background:var(--swift-blue-dark); border-color:var(--swift-blue-dark); color:#fff; }
+</style>
+
+<div class="dash-head">
     <div>
-        <h3 class="page-title mb-1">Company Assets Dashboard</h3>
-        <div class="text-muted small">
-            {% if selected_branch %}
-                Showing <strong>{{ selected_branch.name }}</strong> branch.
-            {% elif is_super_admin %}
-                Showing <strong>all branches</strong>.
-            {% else %}
-                Live overview of your assigned branch(es).
-            {% endif %}
+        <h3>Company Assets Dashboard</h3>
+        <div class="dash-sub">
+            {% if selected_branch %}<strong>{{ selected_branch.name }}</strong> branch
+            {% elif is_super_admin %}<strong>All branches</strong>
+            {% else %}Your assigned branch(es){% endif %}
+            <span class="dot">&bull;</span>{% now "l, j F Y" %}
         </div>
     </div>
-    <div class="d-flex gap-2">
-        <a href="{% url 'assets:export_assets' %}" class="btn btn-outline-secondary">
-            <i class="bi bi-file-earmark-excel"></i> Download {% if selected_branch %}Branch{% else %}All{% endif %} (Excel)
-        </a>
+    <div class="d-flex gap-2 align-items-center">
+        <a href="{% url 'assets:export_assets' %}" class="btn-soft"><i class="bi bi-file-earmark-excel"></i> Export {% if selected_branch %}Branch{% else %}All{% endif %}</a>
+        <a href="{% url 'assets:asset_create' %}" class="btn-primary-swift"><i class="bi bi-plus-lg"></i> Add New Asset</a>
         {% if allow_clear_all %}
-        <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearAllModal">
-            <i class="bi bi-trash3"></i> Clear All Records
-        </button>
+        <div class="dropdown">
+            <button class="btn-soft" type="button" data-bs-toggle="dropdown" aria-label="More actions"><i class="bi bi-three-dots"></i></button>
+            <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#clearAllModal"><i class="bi bi-trash3 me-2"></i>Clear All Records</button></li>
+            </ul>
+        </div>
         {% endif %}
-        <a href="{% url 'assets:asset_create' %}" class="btn btn-swift">
-            <i class="bi bi-plus-lg"></i> Add New Asset
-        </a>
     </div>
 </div>
 
@@ -66,125 +126,73 @@
 </div>
 {% endif %}
 
-{% if workstation_summary %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="section-title mb-0">{{ ws_label }}</h5>
+<div class="sec-title">
+    <h5>Asset Categories</h5>
+    {% if is_super_admin %}<a href="{% url 'assets:category_create' %}" class="btn-soft sm ms-auto"><i class="bi bi-plus-lg"></i> Add Category</a>{% endif %}
 </div>
-<div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <a href="{% url 'assets:workstation_list' %}" class="category-link">
-            <div class="card card-stat hoverable p-3 h-100">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="fw-semibold">{{ ws_label }}</div>
-                        <div class="stat-number">{{ workstation_summary.total }}</div>
-                        {% if workstation_summary.not_working %}
-                        <span class="badge bg-danger mt-1">{{ workstation_summary.not_working }} need attention</span>
-                        {% endif %}
-                    </div>
-                    <div class="category-icon-wrap"><i class="bi bi-pc-display"></i></div>
-                </div>
-            </div>
-        </a>
-    </div>
-</div>
-{% endif %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="section-title mb-0">Asset Categories</h5>
-    {% if is_super_admin %}
-    <a href="{% url 'assets:category_create' %}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-plus-lg"></i> Add Category
-    </a>
-    {% endif %}
-</div>
-<div class="row g-3 mb-4">
-    {% for cat in main_categories %}
-    <div class="col-md-3">
+{% for group in category_groups %}
+<div class="grp-label">{{ group.title }}</div>
+<div class="row g-3">
+    {% for cat in group.items %}
+    <div class="col-sm-6 col-lg-4 col-xl-3">
         {% if cat.sub_categories %}
         <div class="dropdown h-100">
-            <div class="card card-stat hoverable p-3 h-100 other-toggle" role="button"
-                 data-bs-toggle="dropdown" aria-expanded="false">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="fw-semibold">{{ cat.name }}</div>
-                        <div class="stat-number">{{ cat.total }}</div>
-                        {% if cat.not_working %}
-                        <span class="badge bg-danger mt-1">{{ cat.not_working }} need attention</span>
-                        {% endif %}
-                    </div>
-                    <div class="category-icon-wrap"><i class="bi {{ cat.icon_class }}"></i></div>
+            <div class="cat-card other-toggle {% if not cat.total %}cat-zero{% endif %}" role="button" data-bs-toggle="dropdown" aria-expanded="false" style="cursor:pointer">
+                <div class="cat-ico"><i class="bi {{ cat.icon_class }}"></i></div>
+                <div>
+                    <div class="cat-name">{{ cat.name }}</div>
+                    <div class="cat-num">{{ cat.total }}</div>
+                    <div class="cat-more">+ {{ cat.sub_categories|length }} more <i class="bi bi-chevron-down chevron"></i></div>
                 </div>
-                <div class="text-muted small mt-1">
-                    + {{ cat.sub_categories|length }} more <i class="bi bi-chevron-down chevron"></i>
-                </div>
+                {% if cat.not_working %}<span class="pill red">{{ cat.not_working }} need attention</span>{% endif %}
             </div>
             <ul class="dropdown-menu other-dropdown-menu shadow-sm w-100 p-2 mt-1">
                 <li>
-                    <a class="dropdown-item d-flex justify-content-between align-items-center rounded-2 py-2"
-                       href="{% url 'assets:category_detail' cat.id %}">
-                        <span><i class="bi {{ cat.icon_class }} me-2 text-muted"></i>{{ cat.name }}</span>
-                        <span class="fw-semibold">{{ cat.total }}</span>
+                    <a class="dropdown-item d-flex justify-content-between align-items-center rounded-2 py-2" href="{% url 'assets:category_detail' cat.id %}">
+                        <span><i class="bi {{ cat.icon_class }} me-2 text-muted"></i>{{ cat.name }}</span><span class="fw-semibold">{{ cat.total }}</span>
                     </a>
                 </li>
                 {% for sub in cat.sub_categories %}
                 <li>
-                    <a class="dropdown-item d-flex justify-content-between align-items-center rounded-2 py-2"
-                       href="{% url 'assets:category_detail' sub.id %}">
-                        <span><i class="bi {{ sub.icon_class }} me-2 text-muted"></i>{{ sub.name }}</span>
-                        <span class="fw-semibold">{{ sub.total }}</span>
+                    <a class="dropdown-item d-flex justify-content-between align-items-center rounded-2 py-2" href="{% url 'assets:category_detail' sub.id %}">
+                        <span><i class="bi {{ sub.icon_class }} me-2 text-muted"></i>{{ sub.name }}</span><span class="fw-semibold">{{ sub.total }}</span>
                     </a>
                 </li>
                 {% endfor %}
             </ul>
         </div>
         {% else %}
-        <a href="{% url 'assets:category_detail' cat.id %}" class="category-link">
-            <div class="card card-stat hoverable p-3 h-100">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="fw-semibold">{{ cat.name }}</div>
-                        <div class="stat-number">{{ cat.total }}</div>
-                        {% if cat.not_working %}
-                        <span class="badge bg-danger mt-1">{{ cat.not_working }} need attention</span>
-                        {% endif %}
-                    </div>
-                    <div class="category-icon-wrap"><i class="bi {{ cat.icon_class }}"></i></div>
-                </div>
+        <a href="{% if cat.is_workstation %}{% url 'assets:workstation_list' %}{% else %}{% url 'assets:category_detail' cat.id %}{% endif %}" class="category-link d-block h-100">
+            <div class="cat-card {% if not cat.total %}cat-zero{% endif %}">
+                <div class="cat-ico"><i class="bi {{ cat.icon_class }}"></i></div>
+                <div><div class="cat-name">{{ cat.name }}</div><div class="cat-num">{{ cat.total }}</div></div>
+                {% if cat.not_working %}<span class="pill red">{{ cat.not_working }} need attention</span>{% endif %}
             </div>
         </a>
         {% endif %}
     </div>
-    {% empty %}
-    <div class="col-12 text-muted">No categories yet — add some from the Admin Panel.</div>
     {% endfor %}
 </div>
+{% empty %}
+<div class="text-muted mb-4">No categories yet &mdash; add some from the Admin Panel.</div>
+{% endfor %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="section-title mb-0">Recent Changes</h5>
-    <a href="{% url 'assets:history_list' %}" class="btn btn-sm btn-outline-secondary">
-        View all <i class="bi bi-arrow-right"></i>
-    </a>
-</div>
-<div class="card card-stat">
+<div class="sec-title"><h5>Recent Changes</h5><a href="{% url 'assets:history_list' %}" class="btn-soft sm ms-auto">View all <i class="bi bi-arrow-right"></i></a></div>
+<div class="panel overflow-hidden">
     <div class="table-responsive">
-        <table class="table mb-0 align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Asset</th>
-                    <th>Changed By</th>
-                    <th>When</th>
-                </tr>
-            </thead>
+        <table class="table rc-table align-middle">
+            <thead><tr><th>Asset</th><th>What changed</th><th>Changed by</th><th>When</th></tr></thead>
             <tbody>
                 {% for h in recent_changes %}
                 <tr>
-                    <td>{{ h.asset.display_name }}<div class="text-muted small">{{ h.asset.display_tag }}</div></td>
-                    <td>{{ h.changed_by|default:"—" }}</td>
-                    <td class="text-muted small">{{ h.changed_at }}</td>
+                    <td><div class="rc-asset">{{ h.asset.display_name }}</div><div class="rc-tag">{{ h.asset.display_tag }}</div></td>
+                    <td><span class="pill blue">{{ h.change_text }}</span></td>
+                    <td><span class="rc-av">{{ h.changed_by.get_username|default:"?"|slice:":1"|upper }}</span>{{ h.changed_by|default:"—" }}</td>
+                    <td class="text-muted small" title="{{ h.changed_at }}">{{ h.changed_at|timesince }} ago</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="3" class="text-muted text-center py-3">No changes logged yet.</td></tr>
+                <tr><td colspan="4" class="text-muted text-center py-4">No changes logged yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

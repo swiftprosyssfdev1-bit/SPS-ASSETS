@@ -603,6 +603,7 @@ def get_builder_layout(category):
             "label": f.get("label") or "",
             "options": list(f.get("options") or []),
             "lookup_category": f.get("lookup_category") or None,
+            "max_length": f.get("max_length") or None,
         }
         if col in ("asset_tag", "name", "status"):
             list_skip.add(f["name"])   # drawn as the fixed Tag / Name / Status columns

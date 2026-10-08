@@ -1,4 +1,5 @@
 import re
+import types
 
 from io import BytesIO
 
@@ -52,6 +53,7 @@ from .import_utils import (
 )
 from .excel_security import (
     get_export_password, encrypt_xlsx_bytes, set_export_password, export_password_status,
+    disable_export_password, export_protection_disabled,
 )
 from .permissions import (
     is_super_admin, super_admin_required,
@@ -182,6 +184,48 @@ def _dashboard_card_sort_key(cat):
     return (1, 0, name)
 
 
+# --- Dashboard layout helpers (grouped cards, charts, change text) ---------
+DASHBOARD_GROUPS = [
+    ("Computing", ["workstation", "cpu / system unit", "monitor", "laptop"]),
+    ("Peripherals and power", ["keyboard", "mouse", "ups", "bluetooth device"]),
+]
+DASHBOARD_OTHER_GROUP = "Storage, software and other"
+
+STATUS_BAR_COLORS = {
+    "working": "#2e7d32", "active": "#2e7d32", "running": "#2e7d32",
+    "not_working": "#c62828", "stopped": "#c62828", "resigned": "#c62828",
+    "idle": "#9e9e9e", "scrap": "#424242", "missing": "#ad1457",
+    "service": "#F7941D", "open": "#fd7e14", "resolved": "#0d6efd",
+    "completed": "#0d6efd",
+}
+CHANGE_FIELD_LABELS = {
+    "status": "Status", "current_assigned_to": "Assigned to",
+    "current_location": "Location", "brand": "Brand", "model_number": "Model",
+    "serial_number": "Serial no.", "is_active": "Active",
+}
+
+
+def _short(value, limit=32):
+    value = (value or "").strip()
+    if not value:
+        return "\u2014"
+    return value if len(value) <= limit else value[: limit - 1] + "\u2026"
+
+
+def _change_text(h):
+    """'Status: Working \u2192 Not Working' for one AssetHistory row."""
+    if h.field_name == "created":
+        return (h.new_value or "").strip() or "Asset created"
+    if h.field_name == "is_active" and (h.new_value or "").strip().lower() == "false":
+        return "Asset deactivated"
+    label = CHANGE_FIELD_LABELS.get(h.field_name) or h.field_name.replace("_", " ").capitalize()
+    old, new = h.old_value, h.new_value
+    if h.field_name == "status":
+        names = dict(Asset.STATUS_CHOICES)
+        old, new = names.get(old, old), names.get(new, new)
+    return f"{label}: {_short(old)} \u2192 {_short(new)}"
+
+
 @login_required
 def dashboard(request):
     selected_branch, accessible_branches = resolve_selected_branch(request)
@@ -298,9 +342,126 @@ def dashboard(request):
     # SPS011-2 shown as SPS011, is fine and stays. /history has everything.
     prime_display_tags([h.asset for h in recent_changes])
     recent_changes = [h for h in recent_changes if not re.search(r"-\d+$", h.asset.display_tag or "")][:15]
+    # ---- Redesigned dashboard: grouped cards, attention list, charts ----
+    ws_name = workstation_labels()[0]
+    workstation_card = types.SimpleNamespace(
+        id=None, name=ws_name, total=workstation_summary["total"],
+        not_working=workstation_summary["not_working"],
+        icon_class="bi-pc-display", sub_categories=[], is_workstation=True,
+    )
+    all_cards = list(main_categories)
+    for _c in main_categories:
+        _c.is_workstation = False
+        all_cards.extend(_c.sub_categories)
+    for _c in all_cards:
+        _c.is_workstation = False
+
+    def _group_key(cat):
+        return re.sub(r"\s+", " ", cat.name.strip().lower())
+
+    group_buckets = {title: [] for title, _ in DASHBOARD_GROUPS}
+    group_buckets[DASHBOARD_OTHER_GROUP] = []
+    pool = list(main_categories)
+    if workstation_summary["total"] or workstation_summary["not_working"]:
+        pool.insert(0, workstation_card)
+    for cat in pool:
+        key = "workstation" if getattr(cat, "is_workstation", False) else _group_key(cat)
+        placed = False
+        for title, names in DASHBOARD_GROUPS:
+            if key in names:
+                group_buckets[title].append((names.index(key), cat))
+                placed = True
+                break
+        if not placed:
+            group_buckets[DASHBOARD_OTHER_GROUP].append((999, cat))
+    category_groups = []
+    for title in [t for t, _ in DASHBOARD_GROUPS] + [DASHBOARD_OTHER_GROUP]:
+        items = [c for _, c in sorted(group_buckets[title], key=lambda x: x[0])]
+        if items:
+            category_groups.append({"title": title, "items": items})
+
+    attention_total = sum(c.not_working for c in all_cards) + workstation_summary["not_working"]
+    attention_cat_ids = [c.id for c in all_cards if c.not_working]
+    if workstation_summary["not_working"]:
+        attention_cat_ids += list(
+            AssetCategory.objects.filter(name__iexact=WORKSTATION_CATEGORY_NAME)
+            .values_list("id", flat=True)
+        )
+    attention_rows = []
+    if attention_cat_ids:
+        attention_rows = prime_display_tags(
+            real_assets.filter(status__in=ATTENTION_STATUSES, category_id__in=attention_cat_ids)
+            .select_related("category", "branch")
+            .order_by("-updated_at", "-id")[:5]
+        )
+    attention_items = [
+        {
+            "id": a.id, "name": a.display_name, "tag": a.display_tag,
+            "category": a.category.name, "status": a.get_status_display(),
+            "branch": a.branch.name if a.branch_id else "",
+        }
+        for a in attention_rows
+    ]
+
+    status_names = dict(Asset.STATUS_CHOICES)
+    status_rows = list(status_breakdown)[:6]
+    status_max = max([r["count"] for r in status_rows] or [1])
+    status_chart = [
+        {
+            "label": status_names.get(r["status"], r["status"] or "Not set"),
+            "count": r["count"],
+            "pct": max(4, round(r["count"] * 100 / status_max)),
+            "color": STATUS_BAR_COLORS.get(r["status"], "#6c757d"),
+        }
+        for r in status_rows
+    ]
+    # ---- KPI strip + status donut (dashboard header) ----
+    healthy_total = sum(r["count"] for r in status_breakdown if r["status"] in ("working", "active"))
+    _shown_total = sum(r["count"] for r in status_chart) or 1
+    _acc, _stops = 0.0, []
+    for r in status_chart:
+        r["share"] = round(r["count"] * 100 / _shown_total)
+        _end = _acc + r["count"] * 100 / _shown_total
+        _stops.append("%s %.2f%% %.2f%%" % (r["color"], _acc, _end))
+        _acc = _end
+    donut_css = "conic-gradient(" + ", ".join(_stops) + ")" if _stops else ""
+    branch_counts = {
+        r["branch_id"]: r["count"]
+        for r in real_assets.values("branch_id").annotate(count=Count("id"))
+    }
+    branch_rows = [
+        {"label": b.name, "count": branch_counts.get(b.id, 0)}
+        for b in accessible_branches
+    ]
+    if is_super_admin(request.user) and selected_branch is None and branch_counts.get(None):
+        branch_rows.append({"label": "Unassigned", "count": branch_counts[None]})
+    branch_rows.sort(key=lambda r: -r["count"])
+    branch_max = max([r["count"] for r in branch_rows] or [1]) or 1
+    branch_chart = [
+        {
+            "label": r["label"], "count": r["count"],
+            "pct": max(3, round(r["count"] * 100 / branch_max)) if r["count"] else 0,
+        }
+        for r in branch_rows
+    ]
+    for h in recent_changes:
+        h.change_text = _change_text(h)
+
     allow_clear_all = bool(getattr(settings, "ALLOW_CLEAR_ALL", True) and request.user.is_superuser)
     context = {
         "main_categories": main_categories,
+        "category_groups": category_groups,
+        "attention_items": attention_items,
+        "attention_total": attention_total,
+        "attention_more": max(0, attention_total - len(attention_items)),
+        "status_chart": status_chart,
+        "donut_css": donut_css,
+        "kpi_total": total_assets,
+        "kpi_healthy": healthy_total,
+        "kpi_healthy_pct": round(healthy_total * 100 / total_assets) if total_assets else 0,
+        "kpi_categories": sum(len(g["items"]) for g in category_groups),
+        "kpi_branches": 1 if selected_branch else (len(branch_rows) or accessible_branches.count()),
+        "branch_chart": branch_chart if len(branch_chart) > 1 else [],
         "workstation_summary": workstation_summary,
         "total_assets": total_assets,
         "total_records": total_records,
@@ -814,8 +975,16 @@ def workstation_bulk_import(request):
     summary = None
     file_error = None
 
-    branch_id = request.POST.get("branch") or request.GET.get("branch")
-    import_branch = Branch.objects.filter(pk=branch_id, status=True).first() if branch_id else None
+    if request.method == "POST":
+        # Only the branch chosen in the form counts when a file is uploaded.
+        branch_id = (request.POST.get("branch") or "").strip()
+        import_branch = (Branch.objects.filter(pk=branch_id, status=True).first()
+                         if branch_id.isdigit() else None)
+    else:
+        # Opening the page: pre-select the branch active in the top-bar switcher
+        # (this also handles ?branch=<id|all> and remembers it in the session).
+        _sel, _ = resolve_selected_branch(request)
+        import_branch = _sel if (_sel is not None and _sel.status) else None
 
     if request.method == "POST":
         uploaded_file = request.FILES.get("import_file")
@@ -1094,6 +1263,15 @@ def _extra_details_valid(form, request, category, mode="add", existing_extra=Non
     for col, label in config.get("required_common", []):
         if not form.cleaned_data.get(col):
             form.add_error(None, f"{label} is required.")
+            ok = False
+    # Max Length set in the Category Builder for fields bound to a built-in
+    # column (Tag, Name, Brand, Model, Serial ...). These are not in
+    # extra_fields, so they need their own check.
+    for col, meta in (config.get("core_meta") or {}).items():
+        ml = meta.get("max_length")
+        val = form.cleaned_data.get(col)
+        if ml and isinstance(val, str) and len(val.strip()) > ml:
+            form.add_error(None, f"{meta.get('label') or col} cannot exceed {ml} characters.")
             ok = False
     for f in config.get("extra_fields", []):
         if not f.get(flag, True):
@@ -1617,8 +1795,10 @@ def category_delete(request, category_id):
     problem = None
     asset_count = 0
     active_count = 0
-    if name.strip().lower() in builtin_category_names():
-        problem = "This is a built-in category used by the system, so it can't be deleted."
+    is_builtin = name.strip().lower() in builtin_category_names()
+    if name.strip().lower() == "workstation":
+        # Workstation is its own module (not managed through categories).
+        problem = "Workstation is managed separately and can't be deleted here."
     else:
         asset_count = category.assets.count()
         active_count = category.assets.filter(is_active=True).count()
@@ -1641,6 +1821,10 @@ def category_delete(request, category_id):
         if problem:
             messages.error(request, problem)
             return redirect("assets:category_detail", category_id=category.pk)
+        # Built-in category: the admin must explicitly acknowledge the warning.
+        if is_builtin and request.POST.get("confirm_builtin") != "yes":
+            messages.error(request, "Tick the box to confirm you want to delete this built-in category.")
+            return redirect("assets:category_delete", category_id=category.pk)
         # Assets exist: the admin must explicitly confirm deleting them too.
         if asset_count and request.POST.get("confirm_delete_assets") != "yes":
             messages.error(request, "Tick the confirmation box to delete the category together with its assets.")
@@ -1656,7 +1840,7 @@ def category_delete(request, category_id):
         messages.success(request, f'Category "{name}" deleted' + (f" along with {deleted_assets} asset record(s)." if deleted_assets else "."))
         return redirect("assets:dashboard")
     return render(request, "assets/category_confirm_delete.html", {
-        "category": category, "problem": problem,
+        "category": category, "problem": problem, "is_builtin": is_builtin,
         "asset_count": asset_count, "active_count": active_count,
         "inactive_count": asset_count - active_count,
     })
@@ -1984,7 +2168,8 @@ def export_assets(request):
     # The download is always password-protected. If no password is set up,
     # stop here rather than hand out an open file.
     export_password = get_export_password()
-    if not export_password:
+    # Empty password is fine only when the Super Admin removed it on purpose.
+    if not export_password and not export_protection_disabled():
         messages.error(
             request,
             "Export is disabled: no Excel password has been set. "
@@ -2233,7 +2418,9 @@ def export_assets(request):
 
     buffer = BytesIO()
     wb.save(buffer)
-    encrypted = encrypt_xlsx_bytes(buffer.getvalue(), export_password)
+    # No password (removed by the Super Admin) -> plain .xlsx that opens directly.
+    encrypted = (encrypt_xlsx_bytes(buffer.getvalue(), export_password)
+                 if export_password else buffer.getvalue())
 
     response = HttpResponse(
         encrypted,
@@ -2250,6 +2437,13 @@ def export_password_settings(request):
     exports. The current password is never displayed."""
     from .forms import ExportPasswordForm
 
+    if request.method == "POST" and request.POST.get("action") == "remove":
+        if request.POST.get("confirm_remove") != "yes":
+            messages.error(request, "Tick the confirmation box to remove the export password.")
+        else:
+            disable_export_password(user=request.user)
+            messages.success(request, "Export password removed. Excel exports now open without a password.")
+        return redirect("assets:export_password")
     if request.method == "POST":
         form = ExportPasswordForm(request.POST)
         if form.is_valid():
@@ -2260,7 +2454,7 @@ def export_password_settings(request):
         form = ExportPasswordForm()
     is_set, source, updated_at, updated_by = export_password_status()
     return render(request, "assets/export_password.html", {
-        "form": form, "is_set": is_set, "source": source,
+        "form": form, "is_set": is_set, "source": source, "is_disabled": source == "disabled",
         "updated_at": updated_at, "updated_by": updated_by,
     })
 
@@ -2347,8 +2541,16 @@ def bulk_import(request):
     row_warnings = None
     template_notices = None
 
-    branch_id = request.POST.get("branch") or request.GET.get("branch")
-    import_branch = Branch.objects.filter(pk=branch_id, status=True).first() if branch_id else None
+    if request.method == "POST":
+        # Only the branch chosen in the form counts when a file is uploaded.
+        branch_id = (request.POST.get("branch") or "").strip()
+        import_branch = (Branch.objects.filter(pk=branch_id, status=True).first()
+                         if branch_id.isdigit() else None)
+    else:
+        # Opening the page: pre-select the branch active in the top-bar switcher
+        # (this also handles ?branch=<id|all> and remembers it in the session).
+        _sel, _ = resolve_selected_branch(request)
+        import_branch = _sel if (_sel is not None and _sel.status) else None
 
     if request.method == "POST":
         uploaded_file = request.FILES.get("import_file")
@@ -2846,12 +3048,30 @@ def category_builder(request, category_id):
 
     fields = AssetField.objects.filter(category=category).order_by("display_order", "id")
 
+    # How many records exist, and how many actually hold a value for each field,
+    # so the deactivate/delete warnings can show real numbers.
+    field_list = list(fields.select_related("lookup_category"))
+    record_count = category.assets.count()
+    filled = {}
+    for extra in category.assets.values_list("extra_details", flat=True):
+        if not isinstance(extra, dict):
+            continue
+        for k, v in extra.items():
+            if v not in (None, "", [], {}):
+                filled[k] = filled.get(k, 0) + 1
+    for f in field_list:
+        f.filled_count = filled.get(f.key, 0)
+
     return render(request, "assets/category_builder.html", {
 
         "category": category,
 
-        "fields": fields.select_related("lookup_category"),
+        "record_count": record_count,
+
+        "fields": field_list,
         "category_choices": AssetCategory.objects.order_by("name"),
+
+        "is_builtin": category.name.strip().lower() in builtin_category_names(),
 
         "is_super_admin": True,
 
@@ -3284,38 +3504,60 @@ def builder_field_reactivate(request, category_id, field_id):
     return redirect("assets:category_builder", category_id=category_id)
 
 
+def _field_usage(category, key):
+    """(records in the category, records holding a value for field `key`)."""
+    record_count = category.assets.count()
+    filled = 0
+    for extra in category.assets.values_list("extra_details", flat=True):
+        if isinstance(extra, dict) and extra.get(key) not in (None, "", [], {}):
+            filled += 1
+    return record_count, filled
+
+
 @login_required
 @superuser_required
 def builder_field_delete(request, category_id, field_id):
-    """Permanently removes the field definition. Only allowed while the
-    field is inactive, as a safety rail against accidental data loss on a
-    field still in use. Any stored values under this field's key are left
-    untouched inside each Asset's extra_details JSON (simply orphaned,
-    never displayed again) rather than being scrubbed out."""
+    """Permanently removes the field definition. GET shows a confirmation page
+    (with record counts and a built-in warning); POST performs the delete.
+    Only allowed while the field is inactive, as a safety rail against
+    accidental data loss on a field still in use. Any stored values under this
+    field's key are left untouched inside each Asset's extra_details JSON
+    (simply orphaned, never displayed again) rather than being scrubbed out."""
     category = get_object_or_404(AssetCategory, pk=category_id)
     field = get_object_or_404(AssetField, pk=field_id, category=category)
+    is_xhr = request.headers.get("x-requested-with") == "XMLHttpRequest"
 
-    if request.method != "POST":
+    is_builtin = category.name.strip().lower() in builtin_category_names()
+    problem = f"Deactivate '{field.label}' before deleting it." if field.is_active else None
+    record_count, filled_count = _field_usage(category, field.key)
+    needs_confirm = bool(filled_count or is_builtin)
+
+    if request.method == "POST":
+        if problem:
+            if is_xhr:
+                return JsonResponse({"ok": False, "error": problem}, status=400)
+            messages.error(request, problem)
+            return redirect("assets:category_builder", category_id=category_id)
+        if needs_confirm and not is_xhr and request.POST.get("confirm_delete_field") != "yes":
+            messages.error(request, "Tick the confirmation box to delete this field.")
+            return redirect("assets:builder_field_delete", category_id=category_id, field_id=field_id)
+
+        label, key = field.label, field.key
+        field.delete()
+        _log_config_change(
+            request.user, "delete", "AssetField", field_id,
+            f"{category.name}: {label} ({key})",
+        )
+        if is_xhr:
+            return JsonResponse({"ok": True})
+        messages.success(request, f"Field '{label}' permanently deleted.")
         return redirect("assets:category_builder", category_id=category_id)
 
-    if field.is_active:
-        message = f"Deactivate '{field.label}' before deleting it."
-        if request.headers.get("x-requested-with") == "XMLHttpRequest":
-            return JsonResponse({"ok": False, "error": message}, status=400)
-        messages.error(request, message)
-        return redirect("assets:category_builder", category_id=category_id)
-
-    label, key = field.label, field.key
-    field.delete()
-    _log_config_change(
-        request.user, "delete", "AssetField", field_id,
-        f"{category.name}: {label} ({key})",
-    )
-
-    if request.headers.get("x-requested-with") == "XMLHttpRequest":
-        return JsonResponse({"ok": True})
-    messages.success(request, f"Field '{label}' permanently deleted.")
-    return redirect("assets:category_builder", category_id=category_id)
+    return render(request, "assets/field_confirm_delete.html", {
+        "category": category, "field": field, "problem": problem,
+        "is_builtin": is_builtin, "record_count": record_count,
+        "filled_count": filled_count, "needs_confirm": needs_confirm,
+    })
 
 
 
@@ -3591,20 +3833,16 @@ def config_audit_log(request):
 
 
 
-    allow_clear_all = bool(getattr(settings, "ALLOW_CLEAR_ALL", True) and request.user.is_superuser)
-    return render(request, "assets/config_audit_log.html", {"logs": logs, "allow_clear_all": allow_clear_all})
+    return render(request, "assets/config_audit_log.html", {"logs": logs, "allow_delete_all": request.user.is_superuser})
 
 
 @login_required
 @superuser_required
 def config_audit_log_clear(request):
-    if not getattr(settings, "ALLOW_CLEAR_ALL", True):
-        messages.error(request, "Clearing the audit log is disabled in this environment.")
-        return redirect("assets:config_audit_log")
     if request.method != "POST":
         return redirect("assets:config_audit_log")
     if not request.user.check_password(request.POST.get("admin_password", "")):
-        messages.error(request, "Incorrect administrator password. Audit log was not cleared.")
+        messages.error(request, "Incorrect administrator password. Audit log was not deleted.")
         return redirect("assets:config_audit_log")
     with transaction.atomic():
         deleted = ConfigAuditLog.objects.count()
@@ -3612,7 +3850,7 @@ def config_audit_log_clear(request):
         # Leave one entry behind so it is always visible who wiped the log.
         _log_config_change(request.user, "delete", "ConfigAuditLog", None,
                            f"Cleared {deleted} audit log entries")
-    messages.success(request, f"Cleared {deleted} audit log entries.")
+    messages.success(request, f"Deleted all {deleted} audit log entries.")
     return redirect("assets:config_audit_log")
 
 

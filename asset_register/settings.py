@@ -54,6 +54,12 @@ ALLOWED_HOSTS = [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(
 if 'testserver' not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append('testserver')
 
+# Full origins (with scheme) allowed to POST forms, e.g. https://assets.yourcompany.com
+# Required behind Coolify's proxy, otherwise login/forms fail with a CSRF 403.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
+]
+
 
 # Application definition
 
@@ -69,6 +75,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # serves static files when DEBUG is off
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -165,6 +172,11 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
+}
+
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
@@ -188,3 +200,21 @@ try:
 except ValueError:
     MAX_IMPORT_UPLOAD_MB = 10
 
+
+
+# ---------------------------------------------------------------------------
+# Production / reverse-proxy (Coolify + Traefik) settings
+# ---------------------------------------------------------------------------
+# Coolify terminates HTTPS at its proxy and forwards plain HTTP to the container.
+# This tells Django the original request was HTTPS so redirects/CSRF work.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+
+# Secure cookies are on by default whenever DEBUG is off. If you ever serve the
+# app over plain HTTP (no domain/SSL yet), set DJANGO_HTTPS=False in the env,
+# otherwise login will not stick.
+_HTTPS = env_bool('DJANGO_HTTPS', not DEBUG)
+SESSION_COOKIE_SECURE = _HTTPS
+CSRF_COOKIE_SECURE = _HTTPS
+# Coolify already redirects HTTP -> HTTPS, so leave this off unless you need it.
+SECURE_SSL_REDIRECT = env_bool('DJANGO_SSL_REDIRECT', False)
