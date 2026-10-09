@@ -1,6 +1,10 @@
 {% extends "assets/base.html" %}
 {% load asset_extras %}
 {% block title %}Config Audit Log{% endblock %}
+{% block extra_head %}<style>
+    .audit-action { font-size: 11px; font-weight: 500; text-transform: capitalize; color: #475569; }
+    .audit-action-delete { color: #b91c1c; }
+</style>{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3 class="fw-bold text-secondary">Configuration Audit Log</h3>
@@ -33,7 +37,7 @@
                     <td class="text-muted small text-nowrap">{{ log.changed_at|date:"d M Y H:i" }}</td>
                     <td>{{ log.changed_by|default:"-" }}</td>
                     <td>
-                        <span class="badge {% if log.action == 'create' %}bg-success{% elif log.action == 'update' %}bg-primary{% elif log.action == 'deactivate' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ log.action }}</span>
+                        <span class="audit-action{% if log.action == 'delete' %} audit-action-delete{% endif %}">{{ log.action }}</span>
                     </td>
                     <td class="small text-muted">{{ log.model_name }}</td>
                     <td class="small">{{ log.object_repr }}</td>

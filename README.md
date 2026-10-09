@@ -74,11 +74,21 @@ Time zone: `Asia/Kolkata`.
 Assets/
 ├── manage.py
 ├── .env                   # local settings (never commit)
+├── .env.example           # template: copy to .env and fill in
 ├── requirements.txt
 ├── asset_register/        # Django project (settings, urls, wsgi)
 ├── assets/                # main app
 │   ├── models.py          # Asset, AssetField, Workstation, Branch, ConfigAuditLog ...
-│   ├── views.py, urls.py, forms.py
+│   ├── views/             # split by area (see below)
+│   │   ├── dashboard.py   # login, dashboard, search, history
+│   │   ├── assets.py      # categories and asset add / edit / view / delete
+│   │   ├── workstations.py
+│   │   ├── imports.py     # Excel bulk import (assets + workstations)
+│   │   ├── exports.py     # Excel export
+│   │   ├── builder.py     # field builders + config audit log
+│   │   ├── accounts.py    # branches, admins, my account, export password
+│   │   └── common.py      # helpers shared by the files above
+│   ├── urls.py, forms.py
 │   ├── permissions.py     # Super Admin / Branch Admin rules
 │   ├── import_utils.py    # CSV / Excel import
 │   ├── excel_security.py  # export password encryption
@@ -131,11 +141,46 @@ Run tests with `python manage.py test assets`.
 Built for a reverse-proxy setup (Coolify + Traefik): HTTPS terminates at the
 proxy and Django trusts `X-Forwarded-Proto`.
 
-1. Set `DJANGO_DEBUG=False`, a real `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`,
-   `DJANGO_CSRF_TRUSTED_ORIGINS` and the MySQL variables.
-2. Run `python manage.py migrate` and `python manage.py collectstatic --noinput`.
-3. Start with `gunicorn asset_register.wsgi`.
-4. Keep `ALLOW_CLEAR_ALL=False`.
+### Variables to set
+
+Start from `.env.example`. With `DJANGO_DEBUG=False` (production) these are
+**required**:
+
+| Variable | Notes |
+|---|---|
+| `DJANGO_SECRET_KEY` | The app refuses to start without it. Generate one with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"` |
+| `DJANGO_ALLOWED_HOSTS` | Your domain(s), comma-separated. If empty, every request is rejected |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | Full origin with scheme, e.g. `https://assets.example.com`. Without it, login and forms fail with a CSRF 403 behind the proxy |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | MySQL connection. Do **not** set `DB_ENGINE=sqlite` in production |
+
+Optional (safe defaults): `DJANGO_HTTPS`, `DJANGO_SSL_REDIRECT`,
+`ALLOW_CLEAR_ALL` (keep `False`), `MAX_IMPORT_UPLOAD_MB`. See the table above.
+
+### First deploy
+
+1. Set the variables above with `DJANGO_DEBUG=False`.
+2. `python manage.py migrate`
+3. `python manage.py collectstatic --noinput`
+4. `python manage.py createsuperuser`
+5. Optional starter data: `seed_categories`, `seed_dynamic_fields`,
+   `seed_workstation_fields`.
+6. Start with `gunicorn asset_register.wsgi`.
+7. Log in as the Super Admin and set the export password under
+   **Manage → Export Password** (export stays disabled until it is set).
+
+### Updating
+
+Pull the new code, then run `python manage.py migrate` and
+`python manage.py collectstatic --noinput`, and restart Gunicorn.
+
+### Backups
+
+Take a database backup before every update and before any bulk import or
+`--apply` command, for example:
+
+```bash
+mysqldump --single-transaction -u <DB_USER> -p <DB_NAME> > backup_$(date +%F).sql
+```
 
 ## Bringing in old spreadsheet data
 
